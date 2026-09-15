@@ -6,13 +6,20 @@ DOCKER_TAG := acap_quake2_$(ARCH)
 
 ROOT := $(CURDIR)
 
-CONTAINER_CMD := $(CONTAINER_RUNTIME) run --rm -i \
+CONTAINER_ARGS := --rm \
 	-u $(shell id -u):$(shell id -g) \
 	-e HOME=$(ROOT) \
 	-w $(ROOT) \
 	-v $(ROOT):$(ROOT) \
 	-v /etc/passwd:/etc/passwd:ro \
-	-v /etc/group:/etc/group:ro \
+	-v /etc/group:/etc/group:ro
+
+CONTAINER_CMD := $(CONTAINER_RUNTIME) run -i \
+	$(CONTAINER_ARGS) \
+	$(DOCKER_TAG)
+
+CONTAINER_SHELL_CMD := $(CONTAINER_RUNTIME) run -it \
+	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
 SRCS := $(wildcard src/*.c)
@@ -71,7 +78,7 @@ eap: image
 
 .PHONY: shell
 shell: image
-	$(CONTAINER_CMD) bash
+	$(CONTAINER_SHELL_CMD) bash
 
 .PHONY: yquake2-core
 yquake2-core: image
