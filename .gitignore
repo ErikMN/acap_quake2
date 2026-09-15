@@ -1,0 +1,17 @@
+acap_quake2
+
+*.o
+*.eap
+*_LICENSE.txt
+
+package.conf
+package.conf*
+param.conf
+tmp*
+
+debug/
+build/
+release/
+
+*.pak
+baseq2/
