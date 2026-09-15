@@ -17,12 +17,18 @@ The project currently contains:
 - A minimal aarch64 ACAP application
 - An ACAP Native SDK 12.11 build container
 - Yamagi Quake II as a pinned Git submodule
+- SDL2 2.32.10 as a pinned Git submodule
 - ACAP-specific Yamagi build configuration
 - Cross-compilation of:
   - `q2ded`
   - `baseq2/game.so`
+  - `quake2`
+  - `ref_gles3.so`
+- Cross-compilation of SDL2 for aarch64
 
-The next milestone is cross-compiling the Yamagi Quake II client and GLES3 renderer.
+The Yamagi Quake II client and GLES3 renderer now build successfully for aarch64 using the ACAP SDK toolchain.
+
+The next milestone is packaging the client and its runtime dependencies into the ACAP application and testing startup on an Axis device.
 
 ## Clone
 
@@ -68,22 +74,41 @@ make eap
 
 ## Build Yamagi Quake II
 
+Build SDL2 for the ACAP target:
+
+```sh
+make sdl2
+```
+
 Cross-compile the Yamagi Quake II core components:
 
 ```sh
 make yquake2-core
 ```
 
-This currently builds:
+This builds:
 
 ```text
 third_party/yquake2/release/q2ded
 third_party/yquake2/release/baseq2/game.so
 ```
 
-Both binaries are built for aarch64 using the ACAP SDK toolchain.
+Cross-compile the Yamagi Quake II client and GLES3 renderer:
 
-## Yamagi Quake II
+```sh
+make yquake2-client
+```
+
+This builds:
+
+```text
+third_party/yquake2/release/quake2
+third_party/yquake2/release/ref_gles3.so
+```
+
+The binaries are built for aarch64 using the ACAP SDK toolchain.
+
+## Third-party sources
 
 Yamagi Quake II is included as a Git submodule under:
 
@@ -91,7 +116,13 @@ Yamagi Quake II is included as a Git submodule under:
 third_party/yquake2
 ```
 
-The project uses a pinned Yamagi revision to keep builds reproducible.
+SDL2 is included as a Git submodule under:
+
+```text
+third_party/SDL2
+```
+
+The project uses pinned revisions to keep builds reproducible.
 
 ACAP-specific Yamagi build configuration is kept outside the upstream source tree in:
 
