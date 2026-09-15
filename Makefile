@@ -80,6 +80,10 @@ eap: image
 shell: image
 	$(CONTAINER_SHELL_CMD) bash
 
+.PHONY: sdl2
+sdl2: image
+	$(CONTAINER_CMD) ./oci/build_sdl2.sh
+
 .PHONY: yquake2-core
 yquake2-core: image
 	$(CONTAINER_CMD) ./oci/build_yquake2.sh
