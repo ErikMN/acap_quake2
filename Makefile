@@ -88,6 +88,10 @@ sdl2: image
 yquake2-core: image
 	$(CONTAINER_CMD) ./oci/build_yquake2.sh
 
+.PHONY: yquake2-client
+yquake2-client: sdl2
+	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh
+
 # Run clang format in Docker:
 .PHONY: indent
 indent:
