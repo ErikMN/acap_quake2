@@ -9,6 +9,7 @@ WITH_OPENAL := no
 WITH_RPATH := no
 WITH_SYSTEMWIDE := no
 WITH_XDG := no
+WITH_SDL3 := no
 
 # Let the ACAP SDK toolchain provide the system include paths.
 INCLUDE :=
