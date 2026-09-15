@@ -73,6 +73,10 @@ eap: image
 shell: image
 	$(CONTAINER_CMD) bash
 
+.PHONY: yquake2-core
+yquake2-core: image
+	$(CONTAINER_CMD) ./oci/build_yquake2.sh
+
 # Run clang format in Docker:
 .PHONY: indent
 indent:
