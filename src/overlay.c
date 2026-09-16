@@ -23,6 +23,7 @@ struct render_surface {
   EGLImageKHR image;
   GLuint texture;
   GLuint framebuffer;
+  GLuint depth_stencil;
   struct render_surface *next;
 };
 
@@ -240,7 +241,10 @@ overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_c
   float phase = (float)(overlay->frame_count % 120) / 119.0f;
 
   glClearColor(1.0f - phase, phase, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
+  glClearDepthf(1.0f);
+  glClearStencil(0);
+
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   glFinish();
 
@@ -431,6 +435,15 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
 
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, surface->texture, 0);
 
+  glGenRenderbuffers(1, &surface->depth_stencil);
+  glBindRenderbuffer(GL_RENDERBUFFER, surface->depth_stencil);
+
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->width, (GLsizei)overlay->height);
+
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, surface->depth_stencil);
+
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
   GLenum framebuffer_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -450,6 +463,10 @@ destroy_render_surface(struct render_surface *surface)
 {
   if (!surface) {
     return;
+  }
+
+  if (surface->depth_stencil) {
+    glDeleteRenderbuffers(1, &surface->depth_stencil);
   }
 
   if (surface->framebuffer) {
