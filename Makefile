@@ -6,6 +6,8 @@ DOCKER_TAG := acap_quake2_$(ARCH)
 
 ROOT := $(CURDIR)
 
+TARGET_DIR ?= /usr/local/packages/$(PROG)
+
 CONTAINER_ARGS := --rm \
 	-u $(shell id -u):$(shell id -g) \
 	-e HOME=$(ROOT) \
@@ -91,6 +93,16 @@ yquake2-core: image
 .PHONY: yquake2-client
 yquake2-client: sdl2
 	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh
+
+.PHONY: deploy
+deploy: build
+ifdef TARGET_IP
+	@sshpass -p $(TARGET_PWD) scp \
+		$(PROG) \
+		$(TARGET_USR)@$(TARGET_IP):$(TARGET_DIR)/
+else
+	$(error Please set TARGET_IP, TARGET_USR and TARGET_PWD first)
+endif
 
 # Run clang format in Docker:
 .PHONY: indent
