@@ -16,3 +16,4 @@ release/
 *.pak
 baseq2/
 .bash_history
+credentials*.json
