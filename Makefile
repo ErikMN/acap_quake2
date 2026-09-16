@@ -50,6 +50,9 @@ all: $(PROG)
 
 ifdef OECORE_SDK_VERSION
 
+CFLAGS += $(shell pkg-config --cflags egl glesv2)
+LDLIBS += $(shell pkg-config --libs egl glesv2)
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
