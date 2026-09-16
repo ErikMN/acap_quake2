@@ -60,7 +60,7 @@ main(void)
     }
 
     if (ret > 0 && (poll_fd.revents & (POLLIN | POLLPRI))) {
-      if (!overlay_context_process_events(&overlay)) {
+      if (!overlay_context_process_events(&overlay, &gpu)) {
         break;
       }
     }
