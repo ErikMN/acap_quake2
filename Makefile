@@ -50,8 +50,10 @@ all: $(PROG)
 
 ifdef OECORE_SDK_VERSION
 
-CFLAGS += $(shell pkg-config --cflags egl glesv2)
-LDLIBS += $(shell pkg-config --libs egl glesv2)
+GPU_PKGS := egl glesv2 vdostream axoverlay2
+
+CFLAGS += $(shell pkg-config --cflags $(GPU_PKGS))
+LDLIBS += $(shell pkg-config --libs $(GPU_PKGS))
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

@@ -2,8 +2,10 @@
 #include <stdbool.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include "gpu_context.h"
+#include "overlay.h"
 
 #ifndef APP_NAME
 #define APP_NAME "acap_quake2"
@@ -26,7 +28,7 @@ main(void)
   signal(SIGINT, handle_signal);
   signal(SIGTERM, handle_signal);
 
-  syslog(LOG_INFO, "Starting %s", APP_NAME);
+  syslog(LOG_INFO, "*** Starting %s", APP_NAME);
 
   struct gpu_context gpu;
 
@@ -36,13 +38,43 @@ main(void)
     return 1;
   }
 
-  while (running) {
-    pause();
+  struct overlay_context overlay;
+
+  if (!overlay_context_init(&overlay)) {
+    syslog(LOG_ERR, "Failed to initialize overlay system");
+    gpu_context_destroy(&gpu);
+    closelog();
+    return 1;
   }
 
+  struct pollfd poll_fd = {
+    .fd = overlay_context_get_event_fd(&overlay),
+    .events = POLLIN | POLLPRI,
+  };
+
+  while (running) {
+    int ret = poll(&poll_fd, 1, 1000);
+
+    if (ret < 0) {
+      continue;
+    }
+
+    if (ret > 0 && (poll_fd.revents & (POLLIN | POLLPRI))) {
+      if (!overlay_context_process_events(&overlay)) {
+        break;
+      }
+    }
+
+    if (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      syslog(LOG_ERR, "VDO event connection closed");
+      break;
+    }
+  }
+
+  overlay_context_destroy(&overlay);
   gpu_context_destroy(&gpu);
 
-  syslog(LOG_INFO, "Stopping %s", APP_NAME);
+  syslog(LOG_INFO, "*** Stopping %s", APP_NAME);
   closelog();
 
   return 0;
