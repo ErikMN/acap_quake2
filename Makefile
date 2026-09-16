@@ -76,23 +76,23 @@ image:
 		./oci
 
 .PHONY: build
-build: image
+build:
 	$(CONTAINER_CMD) ./oci/build.sh $(FINAL)
 
 .PHONY: eap
-eap: image
+eap:
 	$(CONTAINER_CMD) ./oci/build_eap.sh $(FINAL)
 
 .PHONY: shell
-shell: image
+shell:
 	$(CONTAINER_SHELL_CMD) bash
 
 .PHONY: sdl2
-sdl2: image
+sdl2:
 	$(CONTAINER_CMD) ./oci/build_sdl2.sh
 
 .PHONY: yquake2-core
-yquake2-core: image
+yquake2-core:
 	$(CONTAINER_CMD) ./oci/build_yquake2.sh
 
 .PHONY: yquake2-client
