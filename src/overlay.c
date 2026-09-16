@@ -3,6 +3,7 @@
 #include "gpu_context.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <syslog.h>
 
 #include <EGL/egl.h>
@@ -16,12 +17,26 @@
 #include <vdo-error.h>
 #include <vdo-stream.h>
 
+struct render_surface {
+  unsigned long buffer_id;
+  EGLDisplay display;
+  EGLImageKHR image;
+  GLuint texture;
+  GLuint framebuffer;
+  struct render_surface *next;
+};
+
 static void remove_overlay(struct overlay_context *overlay);
+static void destroy_render_surfaces(struct overlay_context *overlay);
 
-static bool create_test_overlay(struct overlay_context *overlay, const struct gpu_context *gpu, unsigned stream_id);
+static bool create_test_overlay(struct overlay_context *overlay, unsigned stream_id);
 
-static bool
-render_red_frame(struct overlay_context *overlay, const struct gpu_context *gpu, unsigned width, unsigned height);
+static struct render_surface *find_render_surface(struct overlay_context *overlay, unsigned long buffer_id);
+
+static struct render_surface *
+create_render_surface(struct overlay_context *overlay, const struct gpu_context *gpu, axo_buffer *buffer);
+
+static void destroy_render_surface(struct render_surface *surface);
 
 bool
 overlay_context_init(struct overlay_context *overlay)
@@ -31,11 +46,15 @@ overlay_context_init(struct overlay_context *overlay)
   VdoMap *filter = NULL;
 
   overlay->event_stream = NULL;
-  overlay->event_fd = -1;
-  overlay->axo_started = false;
   overlay->format = NULL;
+  overlay->surfaces = NULL;
+  overlay->event_fd = -1;
   overlay->overlay_id = -1;
   overlay->stream_id = 0;
+  overlay->width = 0;
+  overlay->height = 0;
+  overlay->frame_count = 0;
+  overlay->axo_started = false;
 
   if (!axo_start(NULL, &axo_error)) {
     syslog(LOG_ERR, "Failed to start axoverlay2: %s", axo_err_get_message(axo_error));
@@ -114,7 +133,7 @@ overlay_context_get_event_fd(const struct overlay_context *overlay)
 }
 
 bool
-overlay_context_process_events(struct overlay_context *overlay, const struct gpu_context *gpu)
+overlay_context_process_events(struct overlay_context *overlay)
 {
   VdoStream *event_stream = overlay->event_stream;
 
@@ -154,7 +173,7 @@ overlay_context_process_events(struct overlay_context *overlay, const struct gpu
 
         syslog(LOG_INFO, "VDO stream %u available: %ux%u", stream_id, width, height);
 
-        if (!create_test_overlay(overlay, gpu, stream_id)) {
+        if (!create_test_overlay(overlay, stream_id)) {
           g_object_unref(info);
           g_object_unref(stream);
           g_object_unref(event);
@@ -177,33 +196,78 @@ overlay_context_process_events(struct overlay_context *overlay, const struct gpu
   }
 }
 
-static void
-remove_overlay(struct overlay_context *overlay)
+bool
+overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_context *gpu)
 {
-  axo_err *error = NULL;
+  if (overlay->overlay_id < 0) {
+    return true;
+  }
 
-  if (overlay->overlay_id >= 0) {
-    if (!axo_remove_overlay(overlay->overlay_id, &error)) {
-      syslog(LOG_ERR,
-             "Failed to remove overlay %d: %s",
-             overlay->overlay_id,
-             error ? axo_err_get_message(error) : "unknown error");
+  axo_err *error = NULL;
+  axo_buffer *buffer = axo_get_buffer(overlay->overlay_id, NULL, &error);
+
+  if (!buffer) {
+    if (error && (axo_err_get_code(error) == AXO_ERR_WAIT || axo_err_get_code(error) == AXO_ERR_NO_STREAM)) {
+      axo_err_clear(&error);
+      return true;
     }
 
+    syslog(LOG_ERR, "Failed to get overlay buffer: %s", error ? axo_err_get_message(error) : "unknown error");
     axo_err_clear(&error);
-    overlay->overlay_id = -1;
+    return false;
   }
 
-  if (overlay->format) {
-    axo_detailed_format_free(overlay->format);
-    overlay->format = NULL;
+  unsigned long buffer_id = axo_buffer_get_id(buffer);
+
+  struct render_surface *surface = find_render_surface(overlay, buffer_id);
+
+  if (!surface) {
+    surface = create_render_surface(overlay, gpu, buffer);
+
+    if (!surface) {
+      return false;
+    }
+
+    surface->next = overlay->surfaces;
+    overlay->surfaces = surface;
+
+    syslog(LOG_INFO, "Imported overlay buffer %lu", buffer_id);
   }
 
-  overlay->stream_id = 0;
+  glBindFramebuffer(GL_FRAMEBUFFER, surface->framebuffer);
+  glViewport(0, 0, (GLsizei)overlay->width, (GLsizei)overlay->height);
+
+  float phase = (float)(overlay->frame_count % 120) / 119.0f;
+
+  glClearColor(1.0f - phase, phase, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  glFinish();
+
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  if (!axo_submit_buffer(buffer, NULL, &error)) {
+    if (error && axo_err_get_code(error) == AXO_ERR_NO_STREAM) {
+      axo_err_clear(&error);
+      return true;
+    }
+
+    syslog(LOG_ERR, "Failed to submit overlay buffer: %s", error ? axo_err_get_message(error) : "unknown error");
+    axo_err_clear(&error);
+    return false;
+  }
+
+  overlay->frame_count++;
+
+  if (overlay->frame_count % 30 == 0) {
+    syslog(LOG_INFO, "Rendered %u frames on overlay %d", overlay->frame_count, overlay->overlay_id);
+  }
+
+  return true;
 }
 
 static bool
-create_test_overlay(struct overlay_context *overlay, const struct gpu_context *gpu, unsigned stream_id)
+create_test_overlay(struct overlay_context *overlay, unsigned stream_id)
 {
   const unsigned used_width = 320;
   const unsigned used_height = 180;
@@ -249,6 +313,7 @@ create_test_overlay(struct overlay_context *overlay, const struct gpu_context *g
 
   if (overlay_id < 0) {
     syslog(LOG_ERR, "Failed to create overlay: %s", error ? axo_err_get_message(error) : "unknown error");
+
     axo_err_clear(&error);
     axo_detailed_format_free(format);
     return false;
@@ -257,69 +322,62 @@ create_test_overlay(struct overlay_context *overlay, const struct gpu_context *g
   overlay->overlay_id = overlay_id;
   overlay->stream_id = stream_id;
   overlay->format = format;
+  overlay->width = full_width;
+  overlay->height = full_height;
+  overlay->frame_count = 0;
 
   syslog(LOG_INFO, "Created GPU overlay %d on stream %u: %ux%u", overlay_id, stream_id, full_width, full_height);
-
-  if (!render_red_frame(overlay, gpu, full_width, full_height)) {
-    remove_overlay(overlay);
-    return false;
-  }
 
   return true;
 }
 
-static bool
-render_red_frame(struct overlay_context *overlay, const struct gpu_context *gpu, unsigned width, unsigned height)
+static struct render_surface *
+find_render_surface(struct overlay_context *overlay, unsigned long buffer_id)
 {
-  axo_err *error = NULL;
-  axo_buffer *buffer = NULL;
-  EGLImageKHR image = EGL_NO_IMAGE_KHR;
-  GLuint texture = 0;
-  GLuint framebuffer = 0;
-  bool success = false;
+  struct render_surface *surface = overlay->surfaces;
 
+  while (surface) {
+    if (surface->buffer_id == buffer_id) {
+      return surface;
+    }
+
+    surface = surface->next;
+  }
+
+  return NULL;
+}
+
+static struct render_surface *
+create_render_surface(struct overlay_context *overlay, const struct gpu_context *gpu, axo_buffer *buffer)
+{
   PFNEGLCREATEIMAGEKHRPROC create_image = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
-
-  PFNEGLDESTROYIMAGEKHRPROC destroy_image = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
 
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_target_texture =
       (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
 
-  if (!create_image || !destroy_image || !image_target_texture) {
+  if (!create_image || !image_target_texture) {
     syslog(LOG_ERR, "Required EGL image extensions are unavailable");
-    return false;
-  }
-
-  buffer = axo_get_buffer(overlay->overlay_id, NULL, &error);
-
-  if (!buffer) {
-    if (error && (axo_err_get_code(error) == AXO_ERR_WAIT || axo_err_get_code(error) == AXO_ERR_NO_STREAM)) {
-      axo_err_clear(&error);
-      return true;
-    }
-
-    syslog(LOG_ERR, "Failed to get overlay buffer: %s", error ? axo_err_get_message(error) : "unknown error");
-    axo_err_clear(&error);
-    return false;
+    return NULL;
   }
 
   int dma_buf_fd = axo_buffer_get_dma_buf_fd(buffer);
 
   if (dma_buf_fd < 0) {
     syslog(LOG_ERR, "Overlay buffer has no DMA-BUF");
-    return false;
+    return NULL;
   }
 
   axo_detailed_format *format = overlay->format;
 
   uint32_t fourcc = axo_detailed_format_get_drm_fourcc(format);
+
   uint64_t modifier = axo_detailed_format_get_drm_modifier(format, 0);
 
   EGLint attributes[] = {
     EGL_WIDTH,
-    (EGLint)width,
+    (EGLint)overlay->width,
     EGL_HEIGHT,
-    (EGLint)height,
+    (EGLint)overlay->height,
     EGL_LINUX_DRM_FOURCC_EXT,
     (EGLint)fourcc,
     EGL_DMA_BUF_PLANE0_FD_EXT,
@@ -327,7 +385,7 @@ render_red_frame(struct overlay_context *overlay, const struct gpu_context *gpu,
     EGL_DMA_BUF_PLANE0_OFFSET_EXT,
     0,
     EGL_DMA_BUF_PLANE0_PITCH_EXT,
-    (EGLint)(width * 4),
+    (EGLint)(overlay->width * 4),
     EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
     (EGLint)(modifier & 0xffffffff),
     EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
@@ -335,69 +393,125 @@ render_red_frame(struct overlay_context *overlay, const struct gpu_context *gpu,
     EGL_NONE,
   };
 
-  image = create_image(gpu->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attributes);
+  struct render_surface *surface = calloc(1, sizeof(*surface));
 
-  if (image == EGL_NO_IMAGE_KHR) {
-    syslog(LOG_ERR, "Failed to import overlay DMA-BUF as EGLImage: 0x%x", eglGetError());
-    goto out;
+  if (!surface) {
+    syslog(LOG_ERR, "Failed to allocate render surface");
+    return NULL;
   }
 
-  glGenTextures(1, &texture);
-  glBindTexture(GL_TEXTURE_2D, texture);
+  surface->buffer_id = axo_buffer_get_id(buffer);
+  surface->display = gpu->display;
+  surface->image = EGL_NO_IMAGE_KHR;
 
-  image_target_texture(GL_TEXTURE_2D, image);
+  surface->image = create_image(gpu->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attributes);
+
+  if (surface->image == EGL_NO_IMAGE_KHR) {
+    syslog(LOG_ERR, "Failed to import overlay DMA-BUF as EGLImage: 0x%x", eglGetError());
+    destroy_render_surface(surface);
+    return NULL;
+  }
+
+  glGenTextures(1, &surface->texture);
+  glBindTexture(GL_TEXTURE_2D, surface->texture);
+
+  image_target_texture(GL_TEXTURE_2D, surface->image);
 
   GLenum gl_error = glGetError();
 
   if (gl_error != GL_NO_ERROR) {
     syslog(LOG_ERR, "Failed to bind EGLImage as texture: 0x%x", gl_error);
-    goto out;
+    glBindTexture(GL_TEXTURE_2D, 0);
+    destroy_render_surface(surface);
+    return NULL;
   }
 
-  glGenFramebuffers(1, &framebuffer);
-  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glGenFramebuffers(1, &surface->framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, surface->framebuffer);
 
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, surface->texture, 0);
 
   GLenum framebuffer_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
-  if (framebuffer_status != GL_FRAMEBUFFER_COMPLETE) {
-    syslog(LOG_ERR, "Overlay framebuffer incomplete: 0x%x", framebuffer_status);
-    goto out;
-  }
-
-  glViewport(0, 0, (GLsizei)width, (GLsizei)height);
-
-  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
-
-  glFinish();
-
-  if (!axo_submit_buffer(buffer, NULL, &error)) {
-    syslog(LOG_ERR, "Failed to submit overlay buffer: %s", error ? axo_err_get_message(error) : "unknown error");
-    axo_err_clear(&error);
-    goto out;
-  }
-
-  syslog(LOG_INFO, "Submitted red GPU frame to overlay %d", overlay->overlay_id);
-
-  success = true;
-
-out:
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  if (framebuffer) {
-    glDeleteFramebuffers(1, &framebuffer);
+  if (framebuffer_status != GL_FRAMEBUFFER_COMPLETE) {
+    syslog(LOG_ERR, "Overlay framebuffer incomplete: 0x%x", framebuffer_status);
+    destroy_render_surface(surface);
+    return NULL;
   }
 
-  if (texture) {
-    glDeleteTextures(1, &texture);
+  return surface;
+}
+
+static void
+destroy_render_surface(struct render_surface *surface)
+{
+  if (!surface) {
+    return;
   }
 
-  if (image != EGL_NO_IMAGE_KHR) {
-    destroy_image(gpu->display, image);
+  if (surface->framebuffer) {
+    glDeleteFramebuffers(1, &surface->framebuffer);
   }
 
-  return success;
+  if (surface->texture) {
+    glDeleteTextures(1, &surface->texture);
+  }
+
+  if (surface->image != EGL_NO_IMAGE_KHR) {
+    PFNEGLDESTROYIMAGEKHRPROC destroy_image = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
+
+    if (destroy_image) {
+      destroy_image(surface->display, surface->image);
+    }
+  }
+
+  free(surface);
+}
+
+static void
+destroy_render_surfaces(struct overlay_context *overlay)
+{
+  struct render_surface *surface = overlay->surfaces;
+
+  while (surface) {
+    struct render_surface *next = surface->next;
+
+    destroy_render_surface(surface);
+    surface = next;
+  }
+
+  overlay->surfaces = NULL;
+}
+
+static void
+remove_overlay(struct overlay_context *overlay)
+{
+  axo_err *error = NULL;
+
+  destroy_render_surfaces(overlay);
+
+  if (overlay->overlay_id >= 0) {
+    if (!axo_remove_overlay(overlay->overlay_id, &error)) {
+      syslog(LOG_ERR,
+             "Failed to remove overlay %d: %s",
+             overlay->overlay_id,
+             error ? axo_err_get_message(error) : "unknown error");
+    }
+
+    axo_err_clear(&error);
+    overlay->overlay_id = -1;
+  }
+
+  if (overlay->format) {
+    axo_detailed_format_free(overlay->format);
+    overlay->format = NULL;
+  }
+
+  overlay->stream_id = 0;
+  overlay->width = 0;
+  overlay->height = 0;
+  overlay->frame_count = 0;
 }

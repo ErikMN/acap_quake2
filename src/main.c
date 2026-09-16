@@ -3,6 +3,8 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <poll.h>
+#include <errno.h>
+#include <string.h>
 
 #include "gpu_context.h"
 #include "overlay.h"
@@ -53,20 +55,29 @@ main(void)
   };
 
   while (running) {
-    int ret = poll(&poll_fd, 1, 1000);
+    int ret = poll(&poll_fd, 1, 33);
 
     if (ret < 0) {
-      continue;
+      if (errno == EINTR) {
+        continue;
+      }
+
+      syslog(LOG_ERR, "poll failed: %s", strerror(errno));
+      break;
     }
 
     if (ret > 0 && (poll_fd.revents & (POLLIN | POLLPRI))) {
-      if (!overlay_context_process_events(&overlay, &gpu)) {
+      if (!overlay_context_process_events(&overlay)) {
         break;
       }
     }
 
     if (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
       syslog(LOG_ERR, "VDO event connection closed");
+      break;
+    }
+
+    if (!overlay_context_render_frame(&overlay, &gpu)) {
       break;
     }
   }
