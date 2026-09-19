@@ -12,23 +12,30 @@ Initial target:
 
 ## Current status
 
-The project currently contains:
+The Yamagi Quake II client is running on Axis hardware using:
 
-- A minimal aarch64 ACAP application
-- An ACAP Native SDK 12.11 build container
-- Yamagi Quake II as a pinned Git submodule
-- SDL2 2.32.10 as a pinned Git submodule
-- ACAP-specific Yamagi build configuration
-- Cross-compilation of:
-  - `q2ded`
-  - `baseq2/game.so`
-  - `quake2`
-  - `ref_gles3.so`
-- Cross-compilation of SDL2 for aarch64
+```text
+Yamagi Quake II
+      |
+      v
+OpenGL ES 3
+      |
+      v
+EGL
+      |
+      v
+axoverlay2 DMA-BUF
+      |
+      v
+Axis video stream
+```
 
-The Yamagi Quake II client and GLES3 renderer now build successfully for aarch64 using the ACAP SDK toolchain.
+The current renderer runs at half the stream resolution and uses axoverlay2
+2x upscaling. A 1920x1080 stream therefore renders Quake II at 960x540.
 
-The next milestone is packaging the client and its runtime dependencies into the ACAP application and testing startup on an Axis device.
+The EAP packages the launcher, Yamagi client, GLES3 renderer, SDL2 runtime,
+native `game.so`, and pinned Quake II demo game data. Starting the ACAP
+launches `q2dm1` directly.
 
 ## Clone
 
@@ -58,21 +65,25 @@ Open a shell inside the ACAP SDK container:
 make shell
 ```
 
-## Build the ACAP application
+## Build the EAP
 
-Build the minimal ACAP application:
-
-```sh
-make build
-```
-
-Build the EAP package:
+Build the complete application package:
 
 ```sh
 make eap
 ```
 
-## Build Yamagi Quake II
+This builds SDL2 and Yamagi Quake II, downloads the pinned demo game data,
+and creates the EAP in the repository root.
+
+Install the EAP on the Axis device and start `ACAP Quake II`. No manual
+copying of `quake2`, `ref_gles3.so`, SDL2, `game.so`, or PAK files is
+required.
+
+The application uses its ACAP `localdata` directory as Yamagi's writable
+home directory for configuration and other runtime files.
+
+## Build Yamagi Quake II manually
 
 Build SDL2 for the ACAP target:
 
@@ -93,7 +104,7 @@ third_party/yquake2/release/q2ded
 third_party/yquake2/release/baseq2/game.so
 ```
 
-Cross-compile the Yamagi Quake II client and GLES3 renderer:
+Cross-compile the Yamagi Quake II client, GLES3 renderer, and game library:
 
 ```sh
 make yquake2-client
@@ -104,75 +115,45 @@ This builds:
 ```text
 third_party/yquake2/release/quake2
 third_party/yquake2/release/ref_gles3.so
+third_party/yquake2/release/baseq2/game.so
 ```
-
-The binaries are built for aarch64 using the ACAP SDK toolchain.
 
 ## Third-party sources
 
-Yamagi Quake II is included as a Git submodule under:
+Yamagi Quake II is included as a pinned Git submodule under:
 
 ```text
 third_party/yquake2
 ```
 
-SDL2 is included as a Git submodule under:
+SDL2 is included as a pinned Git submodule under:
 
 ```text
 third_party/SDL2
 ```
 
-The project uses pinned revisions to keep builds reproducible.
-
-ACAP-specific Yamagi build configuration is kept outside the upstream source tree in:
+ACAP-specific Yamagi changes are kept outside the upstream source tree in:
 
 ```text
+patches/yquake2-acap.patch
 yquake2-acap.mk
 ```
 
-The intention is to keep modifications to upstream Yamagi as small and isolated as possible.
-
-## Graphics plan
-
-The target graphics architecture is:
-
-```text
-Yamagi Quake II
-      |
-      v
-OpenGL ES 3 renderer
-      |
-      v
-EGL
-      |
-      v
-axoverlay2 GPU buffer
-      |
-      v
-Axis video stream
-```
-
-The first graphics milestone is to render a simple GLES3 frame through `axoverlay2`.
-
-After that, the Yamagi GLES3 renderer will be connected to the same framebuffer path.
-
 ## Game data
 
-Quake II game data is not included in this repository.
+Quake II PAK files are not committed to this repository.
 
-Do not commit Quake II PAK files.
+The EAP build fetches the pinned game data from `drags/docker-quake2`
+and verifies the expected Git blob IDs before packaging it. See
+`THIRD_PARTY_DATA.md` for the exact source revisions and provenance.
 
-The project ignores:
-
-```text
-*.pak
-baseq2/
-```
-
-Game data must be supplied separately by the user.
+The game data remains copyrighted by id Software and is not covered by the
+GPL license of this project.
 
 ## License
 
 This project is licensed under the GNU General Public License version 2.
 
-Yamagi Quake II and its third-party components retain their own copyright and license notices.
+Yamagi Quake II, SDL2, and the Quake II demo data retain their respective
+copyright and license terms. The EAP includes the Yamagi and SDL2 licenses,
+plus the pinned demo-data source README and provenance information.

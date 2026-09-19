@@ -61,13 +61,15 @@ make \
   ACAP_GLES3_OBJS="$ACAP_GLES3_OBJS" \
   ACAP_GLES3_LDLIBS="$ACAP_GLES3_LDLIBS" \
   client \
-  ref_gles3
+  ref_gles3 \
+  game
 
 echo
 echo "Build results:"
 
 file "$YQ2_DIR/release/quake2"
 file "$YQ2_DIR/release/ref_gles3.so"
+file "$YQ2_DIR/release/baseq2/game.so"
 
 echo
 echo "quake2 dependencies:"

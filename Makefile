@@ -6,8 +6,6 @@ DOCKER_TAG := acap_quake2_$(ARCH)
 
 ROOT := $(CURDIR)
 
-TARGET_DIR ?= /usr/local/packages/$(PROG)
-
 CONTAINER_ARGS := --rm \
 	-u $(shell id -u):$(shell id -g) \
 	-e HOME=$(ROOT) \
@@ -24,7 +22,7 @@ CONTAINER_SHELL_CMD := $(CONTAINER_RUNTIME) run -it \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
-SRCS := $(wildcard src/*.c)
+SRCS := src/main.c
 OBJS := $(SRCS:.c=.o)
 
 CFLAGS += -DAPP_NAME=\"$(PROG)\"
@@ -50,16 +48,11 @@ all: $(PROG)
 
 ifdef OECORE_SDK_VERSION
 
-GPU_PKGS := egl glesv2 vdostream axoverlay2
-
-CFLAGS += $(shell pkg-config --cflags $(GPU_PKGS))
-LDLIBS += $(shell pkg-config --libs $(GPU_PKGS))
-
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(PROG): $(OBJS)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(LDFLAGS) $^ -o $@
 
 else
 
@@ -80,7 +73,7 @@ build:
 	$(CONTAINER_CMD) ./oci/build.sh $(FINAL)
 
 .PHONY: eap
-eap:
+eap: yquake2-client
 	$(CONTAINER_CMD) ./oci/build_eap.sh $(FINAL)
 
 .PHONY: shell
@@ -98,16 +91,6 @@ yquake2-core:
 .PHONY: yquake2-client
 yquake2-client: sdl2
 	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh
-
-.PHONY: deploy
-deploy: build
-ifdef TARGET_IP
-	@sshpass -p $(TARGET_PWD) scp \
-		$(PROG) \
-		$(TARGET_USR)@$(TARGET_IP):$(TARGET_DIR)/
-else
-	$(error Please set TARGET_IP, TARGET_USR and TARGET_PWD first)
-endif
 
 # Run clang format in Docker:
 .PHONY: indent
