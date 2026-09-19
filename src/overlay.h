@@ -16,6 +16,11 @@ struct overlay_context {
   unsigned stream_id;
   unsigned width;
   unsigned height;
+  unsigned full_width;
+  unsigned full_height;
+  unsigned render_texture;
+  unsigned render_framebuffer;
+  unsigned render_depth_stencil;
   unsigned frame_count;
   bool axo_started;
 };

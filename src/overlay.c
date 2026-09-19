@@ -30,7 +30,10 @@ struct render_surface {
 static void remove_overlay(struct overlay_context *overlay);
 static void destroy_render_surfaces(struct overlay_context *overlay);
 
-static bool create_test_overlay(struct overlay_context *overlay, unsigned stream_id);
+static bool
+create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned stream_width, unsigned stream_height);
+static bool create_render_target(struct overlay_context *overlay);
+static void destroy_render_target(struct overlay_context *overlay);
 
 static struct render_surface *find_render_surface(struct overlay_context *overlay, unsigned long buffer_id);
 
@@ -56,6 +59,11 @@ overlay_context_init(struct overlay_context *overlay)
   overlay->stream_id = 0;
   overlay->width = 0;
   overlay->height = 0;
+  overlay->full_width = 0;
+  overlay->full_height = 0;
+  overlay->render_texture = 0;
+  overlay->render_framebuffer = 0;
+  overlay->render_depth_stencil = 0;
   overlay->frame_count = 0;
   overlay->axo_started = false;
 
@@ -176,7 +184,7 @@ overlay_context_process_events(struct overlay_context *overlay)
 
         syslog(LOG_INFO, "VDO stream %u available: %ux%u", stream_id, width, height);
 
-        if (!create_test_overlay(overlay, stream_id)) {
+        if (!create_overlay(overlay, stream_id, width, height)) {
           g_object_unref(info);
           g_object_unref(stream);
           g_object_unref(event);
@@ -249,7 +257,7 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
   overlay->current_buffer = buffer;
   overlay->current_surface = surface;
 
-  glBindFramebuffer(GL_FRAMEBUFFER, surface->framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
   glViewport(0, 0, (GLsizei)overlay->width, (GLsizei)overlay->height);
 
   return true;
@@ -259,7 +267,7 @@ void
 overlay_context_bind_frame(struct overlay_context *overlay)
 {
   if (overlay->current_surface) {
-    glBindFramebuffer(GL_FRAMEBUFFER, overlay->current_surface->framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
   } else {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
@@ -269,12 +277,27 @@ bool
 overlay_context_end_frame(struct overlay_context *overlay)
 {
   axo_buffer *buffer = overlay->current_buffer;
+  struct render_surface *surface = overlay->current_surface;
 
-  if (!buffer) {
+  if (!buffer || !surface) {
     return true;
   }
 
   axo_err *error = NULL;
+
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, overlay->render_framebuffer);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, surface->framebuffer);
+
+  glBlitFramebuffer(0,
+                    0,
+                    (GLint)overlay->width,
+                    (GLint)overlay->height,
+                    0,
+                    (GLint)overlay->height,
+                    (GLint)overlay->width,
+                    0,
+                    GL_COLOR_BUFFER_BIT,
+                    GL_NEAREST);
 
   glFinish();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -325,10 +348,11 @@ overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_c
 }
 
 static bool
-create_test_overlay(struct overlay_context *overlay, unsigned stream_id)
+create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned stream_width, unsigned stream_height)
 {
-  const unsigned used_width = 320;
-  const unsigned used_height = 180;
+  bool use_upscale = stream_width % 2 == 0 && stream_height % 2 == 0;
+  unsigned used_width = use_upscale ? stream_width / 2 : stream_width;
+  unsigned used_height = use_upscale ? stream_height / 2 : stream_height;
 
   unsigned full_width;
   unsigned full_height;
@@ -360,6 +384,7 @@ create_test_overlay(struct overlay_context *overlay, unsigned stream_id)
 
   axo_props_set_detailed_format(props, format);
   axo_props_set_size(props, full_width, full_height);
+  axo_props_set_upscale_x2(props, use_upscale);
   axo_props_set_manual_dma_sync(props, true);
 
   axo_match_stream_id(match, stream_id);
@@ -380,13 +405,94 @@ create_test_overlay(struct overlay_context *overlay, unsigned stream_id)
   overlay->overlay_id = overlay_id;
   overlay->stream_id = stream_id;
   overlay->format = format;
-  overlay->width = full_width;
-  overlay->height = full_height;
+  overlay->width = used_width;
+  overlay->height = used_height;
+  overlay->full_width = full_width;
+  overlay->full_height = full_height;
   overlay->frame_count = 0;
 
-  syslog(LOG_INFO, "Created GPU overlay %d on stream %u: %ux%u", overlay_id, stream_id, full_width, full_height);
+  if (!create_render_target(overlay)) {
+    remove_overlay(overlay);
+    return false;
+  }
+
+  syslog(LOG_INFO,
+         "Created GPU overlay %d on stream %u: stream %ux%u, render %ux%u, buffer %ux%u%s",
+         overlay_id,
+         stream_id,
+         stream_width,
+         stream_height,
+         used_width,
+         used_height,
+         full_width,
+         full_height,
+         use_upscale ? ", 2x upscale" : "");
 
   return true;
+}
+
+static bool
+create_render_target(struct overlay_context *overlay)
+{
+  glGenTextures(1, &overlay->render_texture);
+  glBindTexture(GL_TEXTURE_2D, overlay->render_texture);
+
+  glTexImage2D(GL_TEXTURE_2D,
+               0,
+               GL_RGBA8,
+               (GLsizei)overlay->width,
+               (GLsizei)overlay->height,
+               0,
+               GL_RGBA,
+               GL_UNSIGNED_BYTE,
+               NULL);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+  glGenFramebuffers(1, &overlay->render_framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, overlay->render_texture, 0);
+
+  glGenRenderbuffers(1, &overlay->render_depth_stencil);
+  glBindRenderbuffer(GL_RENDERBUFFER, overlay->render_depth_stencil);
+  glRenderbufferStorage(
+      GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->width, (GLsizei)overlay->height);
+  glFramebufferRenderbuffer(
+      GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, overlay->render_depth_stencil);
+
+  GLenum framebuffer_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  if (framebuffer_status != GL_FRAMEBUFFER_COMPLETE) {
+    syslog(LOG_ERR, "Render framebuffer incomplete: 0x%x", framebuffer_status);
+    destroy_render_target(overlay);
+    return false;
+  }
+
+  return true;
+}
+
+static void
+destroy_render_target(struct overlay_context *overlay)
+{
+  if (overlay->render_depth_stencil) {
+    glDeleteRenderbuffers(1, &overlay->render_depth_stencil);
+    overlay->render_depth_stencil = 0;
+  }
+
+  if (overlay->render_framebuffer) {
+    glDeleteFramebuffers(1, &overlay->render_framebuffer);
+    overlay->render_framebuffer = 0;
+  }
+
+  if (overlay->render_texture) {
+    glDeleteTextures(1, &overlay->render_texture);
+    overlay->render_texture = 0;
+  }
 }
 
 static struct render_surface *
@@ -433,9 +539,9 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
 
   EGLint attributes[] = {
     EGL_WIDTH,
-    (EGLint)overlay->width,
+    (EGLint)overlay->full_width,
     EGL_HEIGHT,
-    (EGLint)overlay->height,
+    (EGLint)overlay->full_height,
     EGL_LINUX_DRM_FOURCC_EXT,
     (EGLint)fourcc,
     EGL_DMA_BUF_PLANE0_FD_EXT,
@@ -443,7 +549,7 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
     EGL_DMA_BUF_PLANE0_OFFSET_EXT,
     0,
     EGL_DMA_BUF_PLANE0_PITCH_EXT,
-    (EGLint)(overlay->width * 4),
+    (EGLint)(overlay->full_width * 4),
     EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
     (EGLint)(modifier & 0xffffffff),
     EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
@@ -492,7 +598,8 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
   glGenRenderbuffers(1, &surface->depth_stencil);
   glBindRenderbuffer(GL_RENDERBUFFER, surface->depth_stencil);
 
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->width, (GLsizei)overlay->height);
+  glRenderbufferStorage(
+      GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->full_width, (GLsizei)overlay->full_height);
 
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, surface->depth_stencil);
 
@@ -565,6 +672,7 @@ remove_overlay(struct overlay_context *overlay)
   overlay->current_surface = NULL;
   overlay->current_buffer = NULL;
 
+  destroy_render_target(overlay);
   destroy_render_surfaces(overlay);
 
   if (overlay->overlay_id >= 0) {
@@ -587,5 +695,7 @@ remove_overlay(struct overlay_context *overlay)
   overlay->stream_id = 0;
   overlay->width = 0;
   overlay->height = 0;
+  overlay->full_width = 0;
+  overlay->full_height = 0;
   overlay->frame_count = 0;
 }
