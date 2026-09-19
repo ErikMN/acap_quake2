@@ -49,6 +49,8 @@ overlay_context_init(struct overlay_context *overlay)
   overlay->event_stream = NULL;
   overlay->format = NULL;
   overlay->surfaces = NULL;
+  overlay->current_surface = NULL;
+  overlay->current_buffer = NULL;
   overlay->event_fd = -1;
   overlay->overlay_id = -1;
   overlay->stream_id = 0;
@@ -198,8 +200,17 @@ overlay_context_process_events(struct overlay_context *overlay)
 }
 
 bool
-overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_context *gpu)
+overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_context *gpu)
 {
+  if (!overlay_context_process_events(overlay)) {
+    return false;
+  }
+
+  if (overlay->current_buffer) {
+    syslog(LOG_ERR, "Overlay frame already active");
+    return false;
+  }
+
   if (overlay->overlay_id < 0) {
     return true;
   }
@@ -235,20 +246,41 @@ overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_c
     syslog(LOG_INFO, "Imported overlay buffer %lu", buffer_id);
   }
 
+  overlay->current_buffer = buffer;
+  overlay->current_surface = surface;
+
   glBindFramebuffer(GL_FRAMEBUFFER, surface->framebuffer);
   glViewport(0, 0, (GLsizei)overlay->width, (GLsizei)overlay->height);
 
-  float phase = (float)(overlay->frame_count % 120) / 119.0f;
+  return true;
+}
 
-  glClearColor(1.0f - phase, phase, 0.0f, 1.0f);
-  glClearDepthf(1.0f);
-  glClearStencil(0);
+void
+overlay_context_bind_frame(struct overlay_context *overlay)
+{
+  if (overlay->current_surface) {
+    glBindFramebuffer(GL_FRAMEBUFFER, overlay->current_surface->framebuffer);
+  } else {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+}
 
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+bool
+overlay_context_end_frame(struct overlay_context *overlay)
+{
+  axo_buffer *buffer = overlay->current_buffer;
+
+  if (!buffer) {
+    return true;
+  }
+
+  axo_err *error = NULL;
 
   glFinish();
-
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  overlay->current_buffer = NULL;
+  overlay->current_surface = NULL;
 
   if (!axo_submit_buffer(buffer, NULL, &error)) {
     if (error && axo_err_get_code(error) == AXO_ERR_NO_STREAM) {
@@ -268,6 +300,28 @@ overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_c
   }
 
   return true;
+}
+
+bool
+overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_context *gpu)
+{
+  if (!overlay_context_begin_frame(overlay, gpu)) {
+    return false;
+  }
+
+  if (!overlay->current_surface) {
+    return true;
+  }
+
+  float phase = (float)(overlay->frame_count % 120) / 119.0f;
+
+  glClearColor(1.0f - phase, phase, 0.0f, 1.0f);
+  glClearDepthf(1.0f);
+  glClearStencil(0);
+
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+  return overlay_context_end_frame(overlay);
 }
 
 static bool
@@ -507,6 +561,9 @@ static void
 remove_overlay(struct overlay_context *overlay)
 {
   axo_err *error = NULL;
+
+  overlay->current_surface = NULL;
+  overlay->current_buffer = NULL;
 
   destroy_render_surfaces(overlay);
 

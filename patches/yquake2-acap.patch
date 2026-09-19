@@ -1,0 +1,1901 @@
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -1392,9 +1392,9 @@
+ 	@echo "===> LD $@"
+ 	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
+ else
+-$(BINDIR)/ref_gles3.so : $(REFGLES3_OBJS)
+-	@echo "===> LD $@"
+-	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
++$(BINDIR)/ref_gles3.so : $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS)
++	@echo "===> LD $@"
++	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS) $(LDLIBS) $(ACAP_GLES3_LDLIBS) $(SDLLDFLAGS) -o $@
+ endif
+ 
+ # ref_soft.so
+diff --git a/src/client/refresh/gl3/header/local.h b/src/client/refresh/gl3/header/local.h
+--- a/src/client/refresh/gl3/header/local.h
++++ b/src/client/refresh/gl3/header/local.h
+@@ -474,9 +474,11 @@
+ extern void GL3_GetDrawableSize(int* width, int* height);
+ extern int GL3_PrepareForWindow(void);
+ extern qboolean GL3_IsVsyncActive(void);
+-extern void GL3_SwapWindow(void);
+-extern void GL3_SetVsync(void);
+-extern void GL3_ShutdownContext(void);
++extern void GL3_SwapWindow(void);
++extern void GL3_SetVsync(void);
++extern qboolean GL3_BeginOutputFrame(void);
++extern void GL3_BindOutputFramebuffer(void);
++extern void GL3_ShutdownContext(void);
+ extern int GL3_GetSDLVersion(void);
+ 
+ // gl3_misc.c
+diff --git a/src/client/refresh/gl3/gl3_draw.c b/src/client/refresh/gl3/gl3_draw.c
+--- a/src/client/refresh/gl3/gl3_draw.c
++++ b/src/client/refresh/gl3/gl3_draw.c
+@@ -623,10 +623,10 @@
+ 		GL3_DrawCurrent2Dbatch();
+ 	}
+ 
+-#ifdef YQ2_GL3_GLES
+-	static const GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+-	glInvalidateFramebuffer(GL_FRAMEBUFFER, 3, attachments);
+-#endif
++#if defined(YQ2_GL3_GLES) && !defined(YQ2_ACAP)
++	static const GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
++	glInvalidateFramebuffer(GL_FRAMEBUFFER, 3, attachments);
++#endif
+ 
+ 	GL3_SwapWindow();
+ }
+diff --git a/src/client/refresh/gl3/gl3_main.c b/src/client/refresh/gl3/gl3_main.c
+--- a/src/client/refresh/gl3/gl3_main.c
++++ b/src/client/refresh/gl3/gl3_main.c
+@@ -1702,407 +1702,413 @@
+ 			if(fbState != GL_FRAMEBUFFER_COMPLETE)
+ 			{
+ 				Com_Printf("GL3 SetupGL(): WARNING: FBO is not complete, status = 0x%x\n", fbState);
+-				gl3state.ppFBtexWidth = -1; // to try again next frame; TODO: maybe give up?
+-				gl3state.ppFBObound = false;
+-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+-			}
+-		}
+-
+-		GL3_Clear(); // clear the FBO that's bound now
+-
+-		glViewport(0, 0, w, h); // this will be moved to the center later, so no x/y offset
+-	}
+-	else // rendering directly (not to FBO for postprocessing)
+-	{
+-		glViewport(x, y2, w, h);
+-	}
+-
+-	/* set up projection matrix (eye coordinates -> clip coordinates) */
+-	gl3state.projMat3D = GL3_SetPerspective(r_newrefdef.fov_y);
+-
+-	glCullFace(GL_FRONT);
+-
+-	/* set up view matrix (world coordinates -> eye coordinates) */
+-	{
+-		// first put Z axis going up
+-		hmm_mat4 viewMat = {{
+-			{  0, 0, -1, 0 }, // first *column* (the matrix is column-major)
+-			{ -1, 0,  0, 0 },
+-			{  0, 1,  0, 0 },
+-			{  0, 0,  0, 1 }
+-		}};
+-
+-		// now rotate by view angles
+-		hmm_mat4 rotMat = rotAroundAxisXYZ(-r_newrefdef.viewangles[2], -r_newrefdef.viewangles[0], -r_newrefdef.viewangles[1]);
+-
+-		viewMat = HMM_MultiplyMat4( viewMat, rotMat );
+-
+-		// .. and apply translation for current position
+-		hmm_vec3 trans = HMM_Vec3(-r_newrefdef.vieworg[0], -r_newrefdef.vieworg[1], -r_newrefdef.vieworg[2]);
+-		viewMat = HMM_MultiplyMat4( viewMat, HMM_Translate(trans) );
+-
+-		gl3state.viewMat3D = viewMat;
+-	}
+-
+-	// just use one projection-view-matrix (premultiplied here)
+-	// so we have one less mat4 multiplication in the 3D shaders
+-	gl3state.uni3DData.transProjViewMat4 = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
+-
+-	gl3state.uni3DData.transModelMat4 = gl3_identityMat4;
+-
+-	gl3state.uni3DData.time = r_newrefdef.time;
+-
+-	GL3_UpdateUBO3D();
+-
+-	/* set drawing parms */
+-	if (r_cull->value)
+-	{
+-		glEnable(GL_CULL_FACE);
+-	}
+-	else
+-	{
+-		glDisable(GL_CULL_FACE);
+-	}
+-
+-	glEnable(GL_DEPTH_TEST);
+-}
+-
+-extern int c_visible_lightmaps, c_visible_textures;
+-
+-/*
+- * r_newrefdef must be set before the first call - FIXME: ?! it is set right here
+- */
+-static void
+-GL3_RenderView(refdef_t *fd)
+-{
+-#if 0 // TODO: keep stereo stuff?
+-	if ((gl_state.stereo_mode != STEREO_MODE_NONE) && gl_state.camera_separation) {
+-
+-		qboolean drawing_left_eye = gl_state.camera_separation < 0;
+-		switch (gl_state.stereo_mode) {
+-			case STEREO_MODE_ANAGLYPH:
+-				{
+-
+-					// Work out the colour for each eye.
+-					int anaglyph_colours[] = { 0x4, 0x3 }; // Left = red, right = cyan.
+-
+-					if (strlen(gl1_stereo_anaglyph_colors->string) == 2) {
+-						int eye, colour, missing_bits;
+-						// Decode the colour name from its character.
+-						for (eye = 0; eye < 2; ++eye) {
+-							colour = 0;
+-							switch (toupper(gl1_stereo_anaglyph_colors->string[eye])) {
+-								case 'B': ++colour; // 001 Blue
+-								case 'G': ++colour; // 010 Green
+-								case 'C': ++colour; // 011 Cyan
+-								case 'R': ++colour; // 100 Red
+-								case 'M': ++colour; // 101 Magenta
+-								case 'Y': ++colour; // 110 Yellow
+-									anaglyph_colours[eye] = colour;
+-									break;
+-							}
+-						}
+-						// Fill in any missing bits.
+-						missing_bits = ~(anaglyph_colours[0] | anaglyph_colours[1]) & 0x3;
+-						for (eye = 0; eye < 2; ++eye) {
+-							anaglyph_colours[eye] |= missing_bits;
+-						}
+-					}
+-
+-					// Set the current colour.
+-					glColorMask(
+-						!!(anaglyph_colours[drawing_left_eye] & 0x4),
+-						!!(anaglyph_colours[drawing_left_eye] & 0x2),
+-						!!(anaglyph_colours[drawing_left_eye] & 0x1),
+-						GL_TRUE
+-					);
+-				}
+-				break;
+-			case STEREO_MODE_ROW_INTERLEAVED:
+-			case STEREO_MODE_COLUMN_INTERLEAVED:
+-			case STEREO_MODE_PIXEL_INTERLEAVED:
+-				{
+-					qboolean flip_eyes = true;
+-					int client_x, client_y;
+-
+-					//GLimp_GetClientAreaOffset(&client_x, &client_y);
+-					client_x = 0;
+-					client_y = 0;
+-
+-					GL3_SetGL2D();
+-
+-					glEnable(GL_STENCIL_TEST);
+-					glStencilMask(GL_TRUE);
+-					glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+-
+-					glStencilOp(GL_REPLACE, GL_KEEP, GL_KEEP);
+-					glStencilFunc(GL_NEVER, 0, 1);
+-
+-					glBegin(GL_QUADS);
+-					{
+-						glVertex2i(0, 0);
+-						glVertex2i(vid.width, 0);
+-						glVertex2i(vid.width, vid.height);
+-						glVertex2i(0, vid.height);
+-					}
+-					glEnd();
+-
+-					glStencilOp(GL_INVERT, GL_KEEP, GL_KEEP);
+-					glStencilFunc(GL_NEVER, 1, 1);
+-
+-					glBegin(GL_LINES);
+-					{
+-						if (gl_state.stereo_mode == STEREO_MODE_ROW_INTERLEAVED || gl_state.stereo_mode == STEREO_MODE_PIXEL_INTERLEAVED) {
+-							int y;
+-							for (y = 0; y <= vid.height; y += 2) {
+-								glVertex2f(0, y - 0.5f);
+-								glVertex2f(vid.width, y - 0.5f);
+-							}
+-							flip_eyes ^= (client_y & 1);
+-						}
+-
+-						if (gl_state.stereo_mode == STEREO_MODE_COLUMN_INTERLEAVED || gl_state.stereo_mode == STEREO_MODE_PIXEL_INTERLEAVED) {
+-							int x;
+-							for (x = 0; x <= vid.width; x += 2) {
+-								glVertex2f(x - 0.5f, 0);
+-								glVertex2f(x - 0.5f, vid.height);
+-							}
+-							flip_eyes ^= (client_x & 1);
+-						}
+-					}
+-					glEnd();
+-
+-					glStencilMask(GL_FALSE);
+-					glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+-
+-					glStencilFunc(GL_EQUAL, drawing_left_eye ^ flip_eyes, 1);
+-					glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+-				}
+-				break;
+-			default:
+-				break;
+-		}
+-	}
+-#endif // 0 (stereo stuff)
+-
+-	if (r_norefresh->value)
+-	{
+-		return;
+-	}
+-
+-	r_newrefdef = *fd;
+-
+-	if (!gl3_worldmodel && !(r_newrefdef.rdflags & RDF_NOWORLDMODEL))
+-	{
+-		Com_Error(ERR_DROP, "R_RenderView: NULL worldmodel");
+-	}
+-
+-	if (r_speeds->value)
+-	{
+-		c_brush_polys = 0;
+-		c_alias_polys = 0;
+-	}
+-
+-	GL3_PushDlights();
+-
+-	if (gl_finish->value)
+-	{
+-		glFinish();
+-	}
+-
+-	SetupFrame();
+-
+-	R_SetFrustum(vup, vpn, vright, gl3_origin,
+-		r_newrefdef.fov_x, r_newrefdef.fov_y, frustum);
+-
+-	SetupGL();
+-
+-	GL3_MarkLeaves(); /* done here so we know if we're in water */
+-
+-	GL3_DrawWorld();
+-
+-	GL3_DrawEntitiesOnList();
+-
+-	// kick the silly gl1_flashblend poly lights
+-	// GL3_RenderDlights();
+-
+-	GL3_DrawParticles();
+-
+-	GL3_DrawAlphaSurfaces();
+-
+-	// make sure all remaining batched 3D stuff is drawn
+-	GL3_Draw3DBatchesNow();
+-
+-	// Note: R_Flash() is now GL3_Draw_Flash() and called from GL3_RenderFrame()
+-
+-	if (r_speeds->value)
+-	{
+-		Com_Printf("%4i wpoly %4i epoly %i tex %i lmaps\n",
+-				c_brush_polys, c_alias_polys, c_visible_textures,
+-				c_visible_lightmaps);
+-	}
+-
+-#if 0 // TODO: stereo stuff
+-	switch (gl_state.stereo_mode) {
+-		case STEREO_MODE_NONE:
+-			break;
+-		case STEREO_MODE_ANAGLYPH:
+-			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+-			break;
+-		case STEREO_MODE_ROW_INTERLEAVED:
+-		case STEREO_MODE_COLUMN_INTERLEAVED:
+-		case STEREO_MODE_PIXEL_INTERLEAVED:
+-			glDisable(GL_STENCIL_TEST);
+-			break;
+-		default:
+-			break;
+-	}
+-#endif // 0
+-}
+-
+-#if 0 // TODO: stereo
+-enum opengl_special_buffer_modes
+-GL3_GetSpecialBufferModeForStereoMode(enum stereo_modes stereo_mode) {
+-	switch (stereo_mode) {
+-		case STEREO_MODE_NONE:
+-		case STEREO_SPLIT_HORIZONTAL:
+-		case STEREO_SPLIT_VERTICAL:
+-		case STEREO_MODE_ANAGLYPH:
+-			return OPENGL_SPECIAL_BUFFER_MODE_NONE;
+-		case STEREO_MODE_OPENGL:
+-			return OPENGL_SPECIAL_BUFFER_MODE_STEREO;
+-		case STEREO_MODE_ROW_INTERLEAVED:
+-		case STEREO_MODE_COLUMN_INTERLEAVED:
+-		case STEREO_MODE_PIXEL_INTERLEAVED:
+-			return OPENGL_SPECIAL_BUFFER_MODE_STENCIL;
+-	}
+-	return OPENGL_SPECIAL_BUFFER_MODE_NONE;
+-}
+-#endif // 0
+-
+-static void
+-GL3_SetLightLevel(entity_t *currententity)
+-{
+-	vec3_t shadelight = {0};
+-
+-	if (r_newrefdef.rdflags & RDF_NOWORLDMODEL)
+-	{
+-		return;
+-	}
+-
+-	/* save off light value for server to look at */
+-	GL3_LightPoint(currententity, r_newrefdef.vieworg, shadelight);
+-
+-	/* pick the greatest component, which should be the
+-	 * same as the mono value returned by software */
+-	if (shadelight[0] > shadelight[1])
+-	{
+-		if (shadelight[0] > shadelight[2])
+-		{
+-			r_lightlevel->value = 150 * shadelight[0];
+-		}
+-		else
+-		{
+-			r_lightlevel->value = 150 * shadelight[2];
+-		}
+-	}
+-	else
+-	{
+-		if (shadelight[1] > shadelight[2])
+-		{
+-			r_lightlevel->value = 150 * shadelight[1];
+-		}
+-		else
+-		{
+-			r_lightlevel->value = 150 * shadelight[2];
+-		}
+-	}
+-}
+-
+-static void
+-GL3_RenderFrame(refdef_t *fd)
+-{
+-	// in case some batched 2D draws are outstanding, draw them now
+-	// to preserve draw order (I think here this is only relevant
+-	// for the player model in the multiplayer player setup menu)
+-	GL3_DrawCurrent2Dbatch();
+-
+-	GL3_RenderView(fd);
+-	GL3_SetLightLevel(NULL);
+-	qboolean usedFBO = gl3state.ppFBObound; // if it was/is used this frame
+-	if(usedFBO)
+-	{
+-		glBindFramebuffer(GL_FRAMEBUFFER, 0); // now render to default framebuffer
+-		gl3state.ppFBObound = false;
+-	}
+-	GL3_SetGL2D();
+-
+-	int x = (vid.width - r_newrefdef.width)/2;
+-	int y = (vid.height - r_newrefdef.height)/2;
+-	if (usedFBO)
+-	{
+-		// if we're actually drawing the world and using an FBO, render the FBO's texture
+-		GL3_DrawFrameBufferObject(x, y, r_newrefdef.width, r_newrefdef.height, gl3state.ppFBtex, v_blend);
+-	}
+-	else if(v_blend[3] != 0.0f)
+-	{
+-		GL3_Draw_Flash(v_blend, x, y, r_newrefdef.width, r_newrefdef.height);
+-	}
+-}
+-
+-
+-static void
+-GL3_Clear(void)
+-{
+-	// Define which buffers need clearing
+-	GLbitfield clearFlags = GL_DEPTH_BUFFER_BIT;
+-
+-	if (r_clear->value)
+-	{
+-		clearFlags |= GL_COLOR_BUFFER_BIT;
+-	}
+-
+-	// Stencilbuffer shadows
+-	if (gl_shadows->value && gl3config.stencil)
+-	{
+-		glClearStencil(1);
+-		clearFlags |= GL_STENCIL_BUFFER_BIT;
+-	}
+-
+-#if 0 // TODO: stereo stuff
+-	if (gl3state.stereo_mode >= STEREO_MODE_ROW_INTERLEAVED && gl_state.stereo_mode <= STEREO_MODE_PIXEL_INTERLEAVED) {
+-		glClearStencil(0);
+-		clearFlags |= GL_STENCIL_BUFFER_BIT;
+-	}
+-#endif // 0
+-
+-#ifdef YQ2_GL3_GLES
+-	clearFlags |= GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
+-#endif
+-
+-	glClear(clearFlags);
+-
+-	gl3depthmin = 0;
+-	gl3depthmax = 1;
+-	glDepthFunc(GL_LEQUAL);
+-	glDepthRange(gl3depthmin, gl3depthmax);
+-
+-	if (gl_zfix->value)
+-	{
+-		if (gl3depthmax > gl3depthmin)
+-		{
+-			glPolygonOffset(0.05, 1);
+-		}
+-		else
+-		{
+-			glPolygonOffset(-0.05, -1);
+-		}
+-	}
+-}
+-
+-void
+-GL3_BeginFrame(float camera_separation)
+-{
++				gl3state.ppFBtexWidth = -1; // to try again next frame; TODO: maybe give up?
++				gl3state.ppFBObound = false;
++				GL3_BindOutputFramebuffer();
++			}
++		}
++
++		GL3_Clear(); // clear the FBO that's bound now
++
++		glViewport(0, 0, w, h); // this will be moved to the center later, so no x/y offset
++	}
++	else // rendering directly (not to FBO for postprocessing)
++	{
++		glViewport(x, y2, w, h);
++	}
++
++	/* set up projection matrix (eye coordinates -> clip coordinates) */
++	gl3state.projMat3D = GL3_SetPerspective(r_newrefdef.fov_y);
++
++	glCullFace(GL_FRONT);
++
++	/* set up view matrix (world coordinates -> eye coordinates) */
++	{
++		// first put Z axis going up
++		hmm_mat4 viewMat = {{
++			{  0, 0, -1, 0 }, // first *column* (the matrix is column-major)
++			{ -1, 0,  0, 0 },
++			{  0, 1,  0, 0 },
++			{  0, 0,  0, 1 }
++		}};
++
++		// now rotate by view angles
++		hmm_mat4 rotMat = rotAroundAxisXYZ(-r_newrefdef.viewangles[2], -r_newrefdef.viewangles[0], -r_newrefdef.viewangles[1]);
++
++		viewMat = HMM_MultiplyMat4( viewMat, rotMat );
++
++		// .. and apply translation for current position
++		hmm_vec3 trans = HMM_Vec3(-r_newrefdef.vieworg[0], -r_newrefdef.vieworg[1], -r_newrefdef.vieworg[2]);
++		viewMat = HMM_MultiplyMat4( viewMat, HMM_Translate(trans) );
++
++		gl3state.viewMat3D = viewMat;
++	}
++
++	// just use one projection-view-matrix (premultiplied here)
++	// so we have one less mat4 multiplication in the 3D shaders
++	gl3state.uni3DData.transProjViewMat4 = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
++
++	gl3state.uni3DData.transModelMat4 = gl3_identityMat4;
++
++	gl3state.uni3DData.time = r_newrefdef.time;
++
++	GL3_UpdateUBO3D();
++
++	/* set drawing parms */
++	if (r_cull->value)
++	{
++		glEnable(GL_CULL_FACE);
++	}
++	else
++	{
++		glDisable(GL_CULL_FACE);
++	}
++
++	glEnable(GL_DEPTH_TEST);
++}
++
++extern int c_visible_lightmaps, c_visible_textures;
++
++/*
++ * r_newrefdef must be set before the first call - FIXME: ?! it is set right here
++ */
++static void
++GL3_RenderView(refdef_t *fd)
++{
++#if 0 // TODO: keep stereo stuff?
++	if ((gl_state.stereo_mode != STEREO_MODE_NONE) && gl_state.camera_separation) {
++
++		qboolean drawing_left_eye = gl_state.camera_separation < 0;
++		switch (gl_state.stereo_mode) {
++			case STEREO_MODE_ANAGLYPH:
++				{
++
++					// Work out the colour for each eye.
++					int anaglyph_colours[] = { 0x4, 0x3 }; // Left = red, right = cyan.
++
++					if (strlen(gl1_stereo_anaglyph_colors->string) == 2) {
++						int eye, colour, missing_bits;
++						// Decode the colour name from its character.
++						for (eye = 0; eye < 2; ++eye) {
++							colour = 0;
++							switch (toupper(gl1_stereo_anaglyph_colors->string[eye])) {
++								case 'B': ++colour; // 001 Blue
++								case 'G': ++colour; // 010 Green
++								case 'C': ++colour; // 011 Cyan
++								case 'R': ++colour; // 100 Red
++								case 'M': ++colour; // 101 Magenta
++								case 'Y': ++colour; // 110 Yellow
++									anaglyph_colours[eye] = colour;
++									break;
++							}
++						}
++						// Fill in any missing bits.
++						missing_bits = ~(anaglyph_colours[0] | anaglyph_colours[1]) & 0x3;
++						for (eye = 0; eye < 2; ++eye) {
++							anaglyph_colours[eye] |= missing_bits;
++						}
++					}
++
++					// Set the current colour.
++					glColorMask(
++						!!(anaglyph_colours[drawing_left_eye] & 0x4),
++						!!(anaglyph_colours[drawing_left_eye] & 0x2),
++						!!(anaglyph_colours[drawing_left_eye] & 0x1),
++						GL_TRUE
++					);
++				}
++				break;
++			case STEREO_MODE_ROW_INTERLEAVED:
++			case STEREO_MODE_COLUMN_INTERLEAVED:
++			case STEREO_MODE_PIXEL_INTERLEAVED:
++				{
++					qboolean flip_eyes = true;
++					int client_x, client_y;
++
++					//GLimp_GetClientAreaOffset(&client_x, &client_y);
++					client_x = 0;
++					client_y = 0;
++
++					GL3_SetGL2D();
++
++					glEnable(GL_STENCIL_TEST);
++					glStencilMask(GL_TRUE);
++					glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
++
++					glStencilOp(GL_REPLACE, GL_KEEP, GL_KEEP);
++					glStencilFunc(GL_NEVER, 0, 1);
++
++					glBegin(GL_QUADS);
++					{
++						glVertex2i(0, 0);
++						glVertex2i(vid.width, 0);
++						glVertex2i(vid.width, vid.height);
++						glVertex2i(0, vid.height);
++					}
++					glEnd();
++
++					glStencilOp(GL_INVERT, GL_KEEP, GL_KEEP);
++					glStencilFunc(GL_NEVER, 1, 1);
++
++					glBegin(GL_LINES);
++					{
++						if (gl_state.stereo_mode == STEREO_MODE_ROW_INTERLEAVED || gl_state.stereo_mode == STEREO_MODE_PIXEL_INTERLEAVED) {
++							int y;
++							for (y = 0; y <= vid.height; y += 2) {
++								glVertex2f(0, y - 0.5f);
++								glVertex2f(vid.width, y - 0.5f);
++							}
++							flip_eyes ^= (client_y & 1);
++						}
++
++						if (gl_state.stereo_mode == STEREO_MODE_COLUMN_INTERLEAVED || gl_state.stereo_mode == STEREO_MODE_PIXEL_INTERLEAVED) {
++							int x;
++							for (x = 0; x <= vid.width; x += 2) {
++								glVertex2f(x - 0.5f, 0);
++								glVertex2f(x - 0.5f, vid.height);
++							}
++							flip_eyes ^= (client_x & 1);
++						}
++					}
++					glEnd();
++
++					glStencilMask(GL_FALSE);
++					glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++
++					glStencilFunc(GL_EQUAL, drawing_left_eye ^ flip_eyes, 1);
++					glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
++				}
++				break;
++			default:
++				break;
++		}
++	}
++#endif // 0 (stereo stuff)
++
++	if (r_norefresh->value)
++	{
++		return;
++	}
++
++	r_newrefdef = *fd;
++
++	if (!gl3_worldmodel && !(r_newrefdef.rdflags & RDF_NOWORLDMODEL))
++	{
++		Com_Error(ERR_DROP, "R_RenderView: NULL worldmodel");
++	}
++
++	if (r_speeds->value)
++	{
++		c_brush_polys = 0;
++		c_alias_polys = 0;
++	}
++
++	GL3_PushDlights();
++
++	if (gl_finish->value)
++	{
++		glFinish();
++	}
++
++	SetupFrame();
++
++	R_SetFrustum(vup, vpn, vright, gl3_origin,
++		r_newrefdef.fov_x, r_newrefdef.fov_y, frustum);
++
++	SetupGL();
++
++	GL3_MarkLeaves(); /* done here so we know if we're in water */
++
++	GL3_DrawWorld();
++
++	GL3_DrawEntitiesOnList();
++
++	// kick the silly gl1_flashblend poly lights
++	// GL3_RenderDlights();
++
++	GL3_DrawParticles();
++
++	GL3_DrawAlphaSurfaces();
++
++	// make sure all remaining batched 3D stuff is drawn
++	GL3_Draw3DBatchesNow();
++
++	// Note: R_Flash() is now GL3_Draw_Flash() and called from GL3_RenderFrame()
++
++	if (r_speeds->value)
++	{
++		Com_Printf("%4i wpoly %4i epoly %i tex %i lmaps\n",
++				c_brush_polys, c_alias_polys, c_visible_textures,
++				c_visible_lightmaps);
++	}
++
++#if 0 // TODO: stereo stuff
++	switch (gl_state.stereo_mode) {
++		case STEREO_MODE_NONE:
++			break;
++		case STEREO_MODE_ANAGLYPH:
++			glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++			break;
++		case STEREO_MODE_ROW_INTERLEAVED:
++		case STEREO_MODE_COLUMN_INTERLEAVED:
++		case STEREO_MODE_PIXEL_INTERLEAVED:
++			glDisable(GL_STENCIL_TEST);
++			break;
++		default:
++			break;
++	}
++#endif // 0
++}
++
++#if 0 // TODO: stereo
++enum opengl_special_buffer_modes
++GL3_GetSpecialBufferModeForStereoMode(enum stereo_modes stereo_mode) {
++	switch (stereo_mode) {
++		case STEREO_MODE_NONE:
++		case STEREO_SPLIT_HORIZONTAL:
++		case STEREO_SPLIT_VERTICAL:
++		case STEREO_MODE_ANAGLYPH:
++			return OPENGL_SPECIAL_BUFFER_MODE_NONE;
++		case STEREO_MODE_OPENGL:
++			return OPENGL_SPECIAL_BUFFER_MODE_STEREO;
++		case STEREO_MODE_ROW_INTERLEAVED:
++		case STEREO_MODE_COLUMN_INTERLEAVED:
++		case STEREO_MODE_PIXEL_INTERLEAVED:
++			return OPENGL_SPECIAL_BUFFER_MODE_STENCIL;
++	}
++	return OPENGL_SPECIAL_BUFFER_MODE_NONE;
++}
++#endif // 0
++
++static void
++GL3_SetLightLevel(entity_t *currententity)
++{
++	vec3_t shadelight = {0};
++
++	if (r_newrefdef.rdflags & RDF_NOWORLDMODEL)
++	{
++		return;
++	}
++
++	/* save off light value for server to look at */
++	GL3_LightPoint(currententity, r_newrefdef.vieworg, shadelight);
++
++	/* pick the greatest component, which should be the
++	 * same as the mono value returned by software */
++	if (shadelight[0] > shadelight[1])
++	{
++		if (shadelight[0] > shadelight[2])
++		{
++			r_lightlevel->value = 150 * shadelight[0];
++		}
++		else
++		{
++			r_lightlevel->value = 150 * shadelight[2];
++		}
++	}
++	else
++	{
++		if (shadelight[1] > shadelight[2])
++		{
++			r_lightlevel->value = 150 * shadelight[1];
++		}
++		else
++		{
++			r_lightlevel->value = 150 * shadelight[2];
++		}
++	}
++}
++
++static void
++GL3_RenderFrame(refdef_t *fd)
++{
++	// in case some batched 2D draws are outstanding, draw them now
++	// to preserve draw order (I think here this is only relevant
++	// for the player model in the multiplayer player setup menu)
++	GL3_DrawCurrent2Dbatch();
++
++	GL3_RenderView(fd);
++	GL3_SetLightLevel(NULL);
++	qboolean usedFBO = gl3state.ppFBObound; // if it was/is used this frame
++	if(usedFBO)
++	{
++		GL3_BindOutputFramebuffer();
++		gl3state.ppFBObound = false;
++	}
++	GL3_SetGL2D();
++
++	int x = (vid.width - r_newrefdef.width)/2;
++	int y = (vid.height - r_newrefdef.height)/2;
++	if (usedFBO)
++	{
++		// if we're actually drawing the world and using an FBO, render the FBO's texture
++		GL3_DrawFrameBufferObject(x, y, r_newrefdef.width, r_newrefdef.height, gl3state.ppFBtex, v_blend);
++	}
++	else if(v_blend[3] != 0.0f)
++	{
++		GL3_Draw_Flash(v_blend, x, y, r_newrefdef.width, r_newrefdef.height);
++	}
++}
++
++
++static void
++GL3_Clear(void)
++{
++	// Define which buffers need clearing
++	GLbitfield clearFlags = GL_DEPTH_BUFFER_BIT;
++
++	if (r_clear->value)
++	{
++		clearFlags |= GL_COLOR_BUFFER_BIT;
++	}
++
++	// Stencilbuffer shadows
++	if (gl_shadows->value && gl3config.stencil)
++	{
++		glClearStencil(1);
++		clearFlags |= GL_STENCIL_BUFFER_BIT;
++	}
++
++#if 0 // TODO: stereo stuff
++	if (gl3state.stereo_mode >= STEREO_MODE_ROW_INTERLEAVED && gl_state.stereo_mode <= STEREO_MODE_PIXEL_INTERLEAVED) {
++		glClearStencil(0);
++		clearFlags |= GL_STENCIL_BUFFER_BIT;
++	}
++#endif // 0
++
++#ifdef YQ2_GL3_GLES
++	clearFlags |= GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
++#endif
++
++	glClear(clearFlags);
++
++	gl3depthmin = 0;
++	gl3depthmax = 1;
++	glDepthFunc(GL_LEQUAL);
++	glDepthRange(gl3depthmin, gl3depthmax);
++
++	if (gl_zfix->value)
++	{
++		if (gl3depthmax > gl3depthmin)
++		{
++			glPolygonOffset(0.05, 1);
++		}
++		else
++		{
++			glPolygonOffset(-0.05, -1);
++		}
++	}
++}
++
++void
++GL3_BeginFrame(float camera_separation)
++{
++#ifdef YQ2_ACAP
++	if (!GL3_BeginOutputFrame())
++	{
++		Com_Error(ERR_FATAL, "Failed to acquire ACAP overlay frame");
++	}
++#endif
+ #if 0 // TODO: stereo stuff
+ 	gl_state.camera_separation = camera_separation;
+ 	// force a vid_restart if gl1_stereo has been modified.
+diff --git a/src/client/refresh/gl3/gl3_sdl.c b/src/client/refresh/gl3/gl3_sdl.c
+--- a/src/client/refresh/gl3/gl3_sdl.c
++++ b/src/client/refresh/gl3/gl3_sdl.c
+@@ -27,464 +27,569 @@
+  * =======================================================================
+  */
+ 
+-#include "header/local.h"
+-
+-#ifdef USE_SDL3
+-#include <SDL3/SDL.h>
+-#else
+-#include <SDL2/SDL.h>
+-#endif
+-
+-static SDL_Window* window = NULL;
+-static SDL_GLContext context = NULL;
+-static qboolean vsyncActive = false;
+-qboolean IsHighDPIaware = false;
+-
+-// --------
+-
+-enum {
+-	// Not all GL.h header know about GL_DEBUG_SEVERITY_NOTIFICATION_*.
+-	// DG: yes, it's the same value in GLES3.2
+-	QGL_DEBUG_SEVERITY_NOTIFICATION = 0x826B
+-};
+-
+-/*
+- * Callback function for debug output.
+- */
+-static void APIENTRY
+-DebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
+-              const GLchar *message, const void *userParam)
+-{
+-	const char* sourceStr = "Source: Unknown";
+-	const char* typeStr = "Type: Unknown";
+-	const char* severityStr = "Severity: Unknown";
+-
+-	switch (severity)
+-	{
+-#ifdef YQ2_GL3_GLES
+-  #define SVRCASE(X, STR)  case GL_DEBUG_SEVERITY_ ## X ## _KHR : severityStr = STR; break;
+-#else // Desktop GL
+-  #define SVRCASE(X, STR)  case GL_DEBUG_SEVERITY_ ## X ## _ARB : severityStr = STR; break;
+-#endif
+-
+-		case QGL_DEBUG_SEVERITY_NOTIFICATION: return;
+-		SVRCASE(HIGH, "Severity: High")
+-		SVRCASE(MEDIUM, "Severity: Medium")
+-		SVRCASE(LOW, "Severity: Low")
+-#undef SVRCASE
+-	}
+-
+-	switch (source)
+-	{
+-#ifdef YQ2_GL3_GLES
+-  #define SRCCASE(X)  case GL_DEBUG_SOURCE_ ## X ## _KHR: sourceStr = "Source: " #X; break;
+-#else
+-  #define SRCCASE(X)  case GL_DEBUG_SOURCE_ ## X ## _ARB: sourceStr = "Source: " #X; break;
+-#endif
+-		SRCCASE(API);
+-		SRCCASE(WINDOW_SYSTEM);
+-		SRCCASE(SHADER_COMPILER);
+-		SRCCASE(THIRD_PARTY);
+-		SRCCASE(APPLICATION);
+-		SRCCASE(OTHER);
+-#undef SRCCASE
+-	}
+-
+-	switch(type)
+-	{
+-#ifdef YQ2_GL3_GLES
+-  #define TYPECASE(X)  case GL_DEBUG_TYPE_ ## X ## _KHR: typeStr = "Type: " #X; break;
+-#else
+-  #define TYPECASE(X)  case GL_DEBUG_TYPE_ ## X ## _ARB: typeStr = "Type: " #X; break;
+-#endif
+-		TYPECASE(ERROR);
+-		TYPECASE(DEPRECATED_BEHAVIOR);
+-		TYPECASE(UNDEFINED_BEHAVIOR);
+-		TYPECASE(PORTABILITY);
+-		TYPECASE(PERFORMANCE);
+-		TYPECASE(OTHER);
+-#undef TYPECASE
+-	}
+-
+-	// use PRINT_ALL - this is only called with gl3_debugcontext != 0 anyway.
+-	Com_Printf("GLDBG %s %s %s: %s\n", sourceStr, typeStr, severityStr, message);
+-}
+-
+-// ---------
+-
+-void GL3_SwapWindow(void)
+-{
+-	SDL_GL_SwapWindow(window);
+-}
+-
+-/*
+- * Returns whether the vsync is enabled.
+- */
+-qboolean GL3_IsVsyncActive(void)
+-{
+-	return vsyncActive;
+-}
+-
+-/*
+- * Enables or disables the vsync.
+- */
+-void GL3_SetVsync(void)
+-{
+-	// Make sure that the user given
+-	// value is SDL compatible...
+-	int vsync = 0;
+-
+-	if (r_vsync->value == 1)
+-	{
+-		vsync = 1;
+-	}
+-	else if (r_vsync->value == 2)
+-	{
+-		vsync = -1;
+-	}
+-
+-#ifdef USE_SDL3
+-	if (!SDL_GL_SetSwapInterval(vsync))
+-#else
+-	if (SDL_GL_SetSwapInterval(vsync) == -1)
+-#endif
+-	{
+-		if (vsync == -1)
+-		{
+-			// Not every system supports adaptive
+-			// vsync, fallback to normal vsync.
+-			Com_Printf("Failed to set adaptive vsync, reverting to normal vsync.\n");
+-			SDL_GL_SetSwapInterval(1);
+-		}
+-	}
+-
+-#ifdef USE_SDL3
+-	int vsyncState;
+-       if (!SDL_GL_GetSwapInterval(&vsyncState))
+-       {
+-               Com_Printf("Failed to get vsync state, assuming vsync inactive.\n");
+-               vsyncActive = false;
+-       }
+-       else
+-       {
+-               vsyncActive = vsyncState ? true : false;
+-       }
+-#else
+-	vsyncActive = SDL_GL_GetSwapInterval() != 0;
+-#endif
+-}
+-
+-/*
+- * This function returns the flags used at the SDL window
+- * creation by GLimp_InitGraphics(). In case of error -1
+- * is returned.
+- */
+-int GL3_PrepareForWindow(void)
+-{
+-	// Mkay, let's try to load the libGL,
+-	const char *libgl;
+-	cvar_t *gl3_libgl = ri.Cvar_Get("gl3_libgl", "", CVAR_ARCHIVE);
+-
+-	if (strlen(gl3_libgl->string) == 0)
+-	{
+-		libgl = NULL;
+-	}
+-	else
+-	{
+-		libgl = gl3_libgl->string;
+-	}
+-
+-	while (1)
+-	{
+-#ifdef USE_SDL3
+-		if (!SDL_GL_LoadLibrary(libgl))
+-#else
+-		if (SDL_GL_LoadLibrary(libgl) < 0)
+-#endif
+-		{
+-			if (libgl == NULL)
+-			{
+-				Com_Error(ERR_FATAL, "%s: Couldn't load libGL: %s!",
+-					__func__, SDL_GetError());
+-
+-				return -1;
+-			}
+-			else
+-			{
+-				Com_Printf("%s: Couldn't load libGL: %s!\n",
+-					__func__, SDL_GetError());
+-				Com_Printf("Retrying with default...\n");
+-
+-				ri.Cvar_Set("gl3_libgl", "");
+-				libgl = NULL;
+-			}
+-		}
+-		else
+-		{
+-			break;
+-		}
+-	}
+-
+-	// Set GL context attributs bound to the window.
+-	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+-	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+-	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+-	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+-
+-#ifdef USE_SDL3
+-	if (SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8))
+-#else
+-	if (SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8) == 0)
+-#endif
+-	{
+-		gl3config.stencil = true;
+-	}
+-	else
+-	{
+-		gl3config.stencil = false;
+-	}
+-
+-#ifdef YQ2_GL3_GLES3
+-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+-#else // Desktop GL
+-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+-#endif
+-
+-	// Set GL context flags.
+-	int contextFlags = 0;
+-
+-#ifndef YQ2_GL3_GLES // Desktop GL (at least RPi4 doesn't like this for GLES3)
+-	contextFlags |= SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG;
+-#endif
+-
+-	if (gl3_debugcontext && gl3_debugcontext->value)
+-	{
+-		contextFlags |= SDL_GL_CONTEXT_DEBUG_FLAG;
+-	}
+-
+-	if (contextFlags != 0)
+-	{
+-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, contextFlags);
+-	}
+-
+-	// Let's see if the driver supports MSAA.
+-	int msaa_samples = 0;
+-
+-	if (gl_msaa_samples->value)
+-	{
+-		msaa_samples = gl_msaa_samples->value;
+-
+-#ifdef USE_SDL3
+-		if (!SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1))
+-#else
+-		if (SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1) < 0)
+-#endif
+-		{
+-			Com_Printf("MSAA is unsupported: %s\n", SDL_GetError());
+-
+-			ri.Cvar_SetValue ("r_msaa_samples", 0);
+-
+-			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+-			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
+-		}
+-#ifdef USE_SDL3
+-		else if (!SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa_samples))
+-#else
+-		else if (SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa_samples) < 0)
+-#endif
+-		{
+-			Com_Printf("MSAA %ix is unsupported: %s\n", msaa_samples, SDL_GetError());
+-
+-			ri.Cvar_SetValue("r_msaa_samples", 0);
+-
+-			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+-			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
+-		}
+-	}
+-	else
+-	{
+-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
+-	}
+-
+-	return SDL_WINDOW_OPENGL;
+-}
+-
+-/*
+- * Initializes the OpenGL context. Returns true at
+- * success and false at failure.
+- */
+-int GL3_InitContext(void* win)
+-{
+-	// Coders are stupid.
+-	if (win == NULL)
+-	{
+-		Com_Error(ERR_FATAL, "R_InitContext() must not be called with NULL argument!");
+-
+-		return false;
+-	}
+-
+-	window = (SDL_Window *)win;
+-
+-	// Initialize GL context.
+-	context = SDL_GL_CreateContext(window);
+-
+-	if(context == NULL)
+-	{
+-		Com_Printf("GL3_InitContext(): Creating OpenGL Context failed: %s\n", SDL_GetError());
+-
+-		window = NULL;
+-
+-		return false;
+-	}
+-
+-	// Check if we've got the requested MSAA.
+-	int msaa_samples = 0;
+-
+-	if (gl_msaa_samples->value)
+-	{
+-#ifdef USE_SDL3
+-		if (SDL_GL_GetAttribute(SDL_GL_MULTISAMPLESAMPLES, &msaa_samples))
+-#else
+-		if (SDL_GL_GetAttribute(SDL_GL_MULTISAMPLESAMPLES, &msaa_samples) == 0)
+-#endif
+-		{
+-			ri.Cvar_SetValue("r_msaa_samples", msaa_samples);
+-		}
+-	}
+-
+-	// Check if we've got at least 8 stencil bits
+-	int stencil_bits = 0;
+-
+-	if (gl3config.stencil)
+-	{
+-#ifdef USE_SDL3
+-		if (!SDL_GL_GetAttribute(SDL_GL_STENCIL_SIZE, &stencil_bits) || stencil_bits < 8)
+-#else
+-		if (SDL_GL_GetAttribute(SDL_GL_STENCIL_SIZE, &stencil_bits) < 0 || stencil_bits < 8)
+-#endif
+-		{
+-			gl3config.stencil = false;
+-		}
+-	}
+-
+-	// Enable vsync if requested.
+-	GL3_SetVsync();
+-
+-	// Load GL pointers through GLAD and check context.
+-#ifdef YQ2_GL3_GLES
+-	if( !gladLoadGLES2Loader((void *)SDL_GL_GetProcAddress))
+-#else // Desktop GL
+-	if( !gladLoadGLLoader((void *)SDL_GL_GetProcAddress))
+-#endif
+-	{
+-		Com_Printf("GL3_InitContext(): ERROR: loading OpenGL function pointers failed!\n");
+-
+-		return false;
+-	}
+-#ifdef YQ2_GL3_GLES3
+-	else if (GLVersion.major < 3)
+-#else // Desktop GL
+-	else if (GLVersion.major < 3 || (GLVersion.major == 3 && GLVersion.minor < 2))
+-#endif
+-	{
+-		Com_Printf("GL3_InitContext(): ERROR: glad only got GL version %d.%d!\n", GLVersion.major, GLVersion.minor);
+-
+-		return false;
+-	}
+-	else
+-	{
+-		Com_Printf("Successfully loaded OpenGL function pointers using glad, got version %d.%d!\n", GLVersion.major, GLVersion.minor);
+-	}
+-
+-#ifdef YQ2_GL3_GLES
+-	gl3config.debug_output = GLAD_GL_KHR_debug != 0;
+-#else // Desktop GL
+-	gl3config.debug_output = GLAD_GL_ARB_debug_output != 0;
+-#endif
+-	gl3config.anisotropic = GLAD_GL_EXT_texture_filter_anisotropic != 0;
+-
+-	gl3config.major_version = GLVersion.major;
+-	gl3config.minor_version = GLVersion.minor;
+-
+-	// Debug context setup.
+-	if (gl3_debugcontext && gl3_debugcontext->value && gl3config.debug_output)
+-	{
+-#ifdef YQ2_GL3_GLES
+-		glDebugMessageCallbackKHR(DebugCallback, NULL);
+-
+-		// Call GL3_DebugCallback() synchronously, i.e. directly when and
+-		// where the error happens (so we can get the cause in a backtrace)
+-		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_KHR);
+-#else // Desktop GL
+-		glDebugMessageCallbackARB(DebugCallback, NULL);
+-		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
+-#endif
+-	}
+-
+-	// Window title - set here so we can display renderer name in it.
+-	char title[40] = {0};
+-#ifdef YQ2_GL3_GLES3
+-	snprintf(title, sizeof(title), "Yamagi Quake II %s - OpenGL ES 3.0", YQ2VERSION);
+-#else
+-	snprintf(title, sizeof(title), "Yamagi Quake II %s - OpenGL 3.2", YQ2VERSION);
+-#endif
+-	SDL_SetWindowTitle(window, title);
+-
+-#if SDL_VERSION_ATLEAST(2, 26, 0)
+-	// Figure out if we are high dpi aware.
+-	int flags = SDL_GetWindowFlags(win);
+-#ifdef USE_SDL3
+-	IsHighDPIaware = (flags & SDL_WINDOW_HIGH_PIXEL_DENSITY) ? true : false;
+-#else
+-	IsHighDPIaware = (flags & SDL_WINDOW_ALLOW_HIGHDPI) ? true : false;
+-#endif
+-#endif
+-
+-	return true;
+-}
+-
+-/*
+- * Fills the actual size of the drawable into width and height.
+- */
+-void GL3_GetDrawableSize(int* width, int* height)
+-{
+-#ifdef USE_SDL3
+-	SDL_GetWindowSizeInPixels(window, width, height);
+-#else
+-	SDL_GL_GetDrawableSize(window, width, height);
+-#endif
+-}
+-
+-/*
+- * Shuts the GL context down.
+- */
+-void GL3_ShutdownContext()
+-{
+-	if (window)
+-	{
+-		if(context)
+-		{
+-#ifdef USE_SDL3
+-			SDL_GL_DestroyContext(context);
+-#else
+-			SDL_GL_DeleteContext(context);
+-#endif
+-			context = NULL;
+-		}
+-	}
+-}
+-
+-/*
+- * Returns the SDL major version. Implemented
+- * here to not polute gl3_main.c with the SDL
+- * headers.
+- */
++#include "header/local.h"
++
++#ifdef YQ2_ACAP
++#include "gpu_context.h"
++#include "overlay.h"
++#endif
++
++#ifdef USE_SDL3
++#include <SDL3/SDL.h>
++#else
++#include <SDL2/SDL.h>
++#endif
++
++static SDL_Window* window = NULL;
++#ifndef YQ2_ACAP
++static SDL_GLContext context = NULL;
++#else
++static struct gpu_context acap_gpu;
++static struct overlay_context acap_overlay;
++static qboolean acap_gpu_initialized = false;
++static qboolean acap_overlay_initialized = false;
++#endif
++static qboolean vsyncActive = false;
++qboolean IsHighDPIaware = false;
++
++// --------
++
++enum {
++	// Not all GL.h header know about GL_DEBUG_SEVERITY_NOTIFICATION_*.
++	// DG: yes, it's the same value in GLES3.2
++	QGL_DEBUG_SEVERITY_NOTIFICATION = 0x826B
++};
++
++/*
++ * Callback function for debug output.
++ */
++static void APIENTRY
++DebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
++              const GLchar *message, const void *userParam)
++{
++	const char* sourceStr = "Source: Unknown";
++	const char* typeStr = "Type: Unknown";
++	const char* severityStr = "Severity: Unknown";
++
++	switch (severity)
++	{
++#ifdef YQ2_GL3_GLES
++  #define SVRCASE(X, STR)  case GL_DEBUG_SEVERITY_ ## X ## _KHR : severityStr = STR; break;
++#else // Desktop GL
++  #define SVRCASE(X, STR)  case GL_DEBUG_SEVERITY_ ## X ## _ARB : severityStr = STR; break;
++#endif
++
++		case QGL_DEBUG_SEVERITY_NOTIFICATION: return;
++		SVRCASE(HIGH, "Severity: High")
++		SVRCASE(MEDIUM, "Severity: Medium")
++		SVRCASE(LOW, "Severity: Low")
++#undef SVRCASE
++	}
++
++	switch (source)
++	{
++#ifdef YQ2_GL3_GLES
++  #define SRCCASE(X)  case GL_DEBUG_SOURCE_ ## X ## _KHR: sourceStr = "Source: " #X; break;
++#else
++  #define SRCCASE(X)  case GL_DEBUG_SOURCE_ ## X ## _ARB: sourceStr = "Source: " #X; break;
++#endif
++		SRCCASE(API);
++		SRCCASE(WINDOW_SYSTEM);
++		SRCCASE(SHADER_COMPILER);
++		SRCCASE(THIRD_PARTY);
++		SRCCASE(APPLICATION);
++		SRCCASE(OTHER);
++#undef SRCCASE
++	}
++
++	switch(type)
++	{
++#ifdef YQ2_GL3_GLES
++  #define TYPECASE(X)  case GL_DEBUG_TYPE_ ## X ## _KHR: typeStr = "Type: " #X; break;
++#else
++  #define TYPECASE(X)  case GL_DEBUG_TYPE_ ## X ## _ARB: typeStr = "Type: " #X; break;
++#endif
++		TYPECASE(ERROR);
++		TYPECASE(DEPRECATED_BEHAVIOR);
++		TYPECASE(UNDEFINED_BEHAVIOR);
++		TYPECASE(PORTABILITY);
++		TYPECASE(PERFORMANCE);
++		TYPECASE(OTHER);
++#undef TYPECASE
++	}
++
++	// use PRINT_ALL - this is only called with gl3_debugcontext != 0 anyway.
++	Com_Printf("GLDBG %s %s %s: %s\n", sourceStr, typeStr, severityStr, message);
++}
++
++// ---------
++
++void GL3_SwapWindow(void)
++{
++#ifdef YQ2_ACAP
++	if (!overlay_context_end_frame(&acap_overlay))
++	{
++		Com_Error(ERR_FATAL, "Failed to submit ACAP overlay frame");
++	}
++#else
++	SDL_GL_SwapWindow(window);
++#endif
++}
++
++/*
++ * Returns whether the vsync is enabled.
++ */
++qboolean GL3_IsVsyncActive(void)
++{
++	return vsyncActive;
++}
++
++/*
++ * Enables or disables the vsync.
++ */
++void GL3_SetVsync(void)
++{
++#ifdef YQ2_ACAP
++	vsyncActive = false;
++	return;
++#endif
++
++	// Make sure that the user given
++	// value is SDL compatible...
++	int vsync = 0;
++
++	if (r_vsync->value == 1)
++	{
++		vsync = 1;
++	}
++	else if (r_vsync->value == 2)
++	{
++		vsync = -1;
++	}
++
++#ifdef USE_SDL3
++	if (!SDL_GL_SetSwapInterval(vsync))
++#else
++	if (SDL_GL_SetSwapInterval(vsync) == -1)
++#endif
++	{
++		if (vsync == -1)
++		{
++			// Not every system supports adaptive
++			// vsync, fallback to normal vsync.
++			Com_Printf("Failed to set adaptive vsync, reverting to normal vsync.\n");
++			SDL_GL_SetSwapInterval(1);
++		}
++	}
++
++#ifdef USE_SDL3
++	int vsyncState;
++       if (!SDL_GL_GetSwapInterval(&vsyncState))
++       {
++               Com_Printf("Failed to get vsync state, assuming vsync inactive.\n");
++               vsyncActive = false;
++       }
++       else
++       {
++               vsyncActive = vsyncState ? true : false;
++       }
++#else
++	vsyncActive = SDL_GL_GetSwapInterval() != 0;
++#endif
++}
++
++/*
++ * This function returns the flags used at the SDL window
++ * creation by GLimp_InitGraphics(). In case of error -1
++ * is returned.
++ */
++int GL3_PrepareForWindow(void)
++{
++#ifdef YQ2_ACAP
++	gl3config.stencil = true;
++	ri.Cvar_SetValue("r_msaa_samples", 0);
++	return 0;
++#endif
++
++	// Mkay, let's try to load the libGL,
++	const char *libgl;
++	cvar_t *gl3_libgl = ri.Cvar_Get("gl3_libgl", "", CVAR_ARCHIVE);
++
++	if (strlen(gl3_libgl->string) == 0)
++	{
++		libgl = NULL;
++	}
++	else
++	{
++		libgl = gl3_libgl->string;
++	}
++
++	while (1)
++	{
++#ifdef USE_SDL3
++		if (!SDL_GL_LoadLibrary(libgl))
++#else
++		if (SDL_GL_LoadLibrary(libgl) < 0)
++#endif
++		{
++			if (libgl == NULL)
++			{
++				Com_Error(ERR_FATAL, "%s: Couldn't load libGL: %s!",
++					__func__, SDL_GetError());
++
++				return -1;
++			}
++			else
++			{
++				Com_Printf("%s: Couldn't load libGL: %s!\n",
++					__func__, SDL_GetError());
++				Com_Printf("Retrying with default...\n");
++
++				ri.Cvar_Set("gl3_libgl", "");
++				libgl = NULL;
++			}
++		}
++		else
++		{
++			break;
++		}
++	}
++
++	// Set GL context attributs bound to the window.
++	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
++	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
++	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
++	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
++	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
++
++#ifdef USE_SDL3
++	if (SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8))
++#else
++	if (SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8) == 0)
++#endif
++	{
++		gl3config.stencil = true;
++	}
++	else
++	{
++		gl3config.stencil = false;
++	}
++
++#ifdef YQ2_GL3_GLES3
++	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
++	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
++	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
++#else // Desktop GL
++	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
++	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
++	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
++#endif
++
++	// Set GL context flags.
++	int contextFlags = 0;
++
++#ifndef YQ2_GL3_GLES // Desktop GL (at least RPi4 doesn't like this for GLES3)
++	contextFlags |= SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG;
++#endif
++
++	if (gl3_debugcontext && gl3_debugcontext->value)
++	{
++		contextFlags |= SDL_GL_CONTEXT_DEBUG_FLAG;
++	}
++
++	if (contextFlags != 0)
++	{
++		SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, contextFlags);
++	}
++
++	// Let's see if the driver supports MSAA.
++	int msaa_samples = 0;
++
++	if (gl_msaa_samples->value)
++	{
++		msaa_samples = gl_msaa_samples->value;
++
++#ifdef USE_SDL3
++		if (!SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1))
++#else
++		if (SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1) < 0)
++#endif
++		{
++			Com_Printf("MSAA is unsupported: %s\n", SDL_GetError());
++
++			ri.Cvar_SetValue ("r_msaa_samples", 0);
++
++			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
++			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
++		}
++#ifdef USE_SDL3
++		else if (!SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa_samples))
++#else
++		else if (SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa_samples) < 0)
++#endif
++		{
++			Com_Printf("MSAA %ix is unsupported: %s\n", msaa_samples, SDL_GetError());
++
++			ri.Cvar_SetValue("r_msaa_samples", 0);
++
++			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
++			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
++		}
++	}
++	else
++	{
++		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
++		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
++	}
++
++	return SDL_WINDOW_OPENGL;
++}
++
++/*
++ * Initializes the OpenGL context. Returns true at
++ * success and false at failure.
++ */
++int GL3_InitContext(void* win)
++{
++	// Coders are stupid.
++	if (win == NULL)
++	{
++		Com_Error(ERR_FATAL, "R_InitContext() must not be called with NULL argument!");
++
++		return false;
++	}
++
++	window = (SDL_Window *)win;
++
++#ifdef YQ2_ACAP
++	if (!gpu_context_init(&acap_gpu))
++	{
++		Com_Printf("GL3_InitContext(): Creating ACAP EGL context failed.\n");
++		window = NULL;
++		return false;
++	}
++
++	acap_gpu_initialized = true;
++
++	if (!overlay_context_init(&acap_overlay))
++	{
++		Com_Printf("GL3_InitContext(): Initializing ACAP overlay failed.\n");
++		gpu_context_destroy(&acap_gpu);
++		acap_gpu_initialized = false;
++		window = NULL;
++		return false;
++	}
++
++	acap_overlay_initialized = true;
++#else
++	// Initialize GL context.
++	context = SDL_GL_CreateContext(window);
++
++	if(context == NULL)
++	{
++		Com_Printf("GL3_InitContext(): Creating OpenGL Context failed: %s\n", SDL_GetError());
++
++		window = NULL;
++
++		return false;
++	}
++#endif
++
++#ifndef YQ2_ACAP
++	// Check if we've got the requested MSAA.
++	int msaa_samples = 0;
++
++	if (gl_msaa_samples->value)
++	{
++#ifdef USE_SDL3
++		if (SDL_GL_GetAttribute(SDL_GL_MULTISAMPLESAMPLES, &msaa_samples))
++#else
++		if (SDL_GL_GetAttribute(SDL_GL_MULTISAMPLESAMPLES, &msaa_samples) == 0)
++#endif
++		{
++			ri.Cvar_SetValue("r_msaa_samples", msaa_samples);
++		}
++	}
++
++	// Check if we've got at least 8 stencil bits
++	int stencil_bits = 0;
++
++	if (gl3config.stencil)
++	{
++#ifdef USE_SDL3
++		if (!SDL_GL_GetAttribute(SDL_GL_STENCIL_SIZE, &stencil_bits) || stencil_bits < 8)
++#else
++		if (SDL_GL_GetAttribute(SDL_GL_STENCIL_SIZE, &stencil_bits) < 0 || stencil_bits < 8)
++#endif
++		{
++			gl3config.stencil = false;
++		}
++	}
++
++#endif
++
++	// Enable vsync if requested.
++	GL3_SetVsync();
++
++	// Load GL pointers through GLAD and check context.
++#ifdef YQ2_GL3_GLES
++#ifdef YQ2_ACAP
++	if( !gladLoadGLES2Loader((void *)eglGetProcAddress))
++#else
++	if( !gladLoadGLES2Loader((void *)SDL_GL_GetProcAddress))
++#endif
++#else // Desktop GL
++	if( !gladLoadGLLoader((void *)SDL_GL_GetProcAddress))
++#endif
++	{
++		Com_Printf("GL3_InitContext(): ERROR: loading OpenGL function pointers failed!\n");
++
++		return false;
++	}
++#ifdef YQ2_GL3_GLES3
++	else if (GLVersion.major < 3)
++#else // Desktop GL
++	else if (GLVersion.major < 3 || (GLVersion.major == 3 && GLVersion.minor < 2))
++#endif
++	{
++		Com_Printf("GL3_InitContext(): ERROR: glad only got GL version %d.%d!\n", GLVersion.major, GLVersion.minor);
++
++		return false;
++	}
++	else
++	{
++		Com_Printf("Successfully loaded OpenGL function pointers using glad, got version %d.%d!\n", GLVersion.major, GLVersion.minor);
++	}
++
++#ifdef YQ2_GL3_GLES
++	gl3config.debug_output = GLAD_GL_KHR_debug != 0;
++#else // Desktop GL
++	gl3config.debug_output = GLAD_GL_ARB_debug_output != 0;
++#endif
++	gl3config.anisotropic = GLAD_GL_EXT_texture_filter_anisotropic != 0;
++
++	gl3config.major_version = GLVersion.major;
++	gl3config.minor_version = GLVersion.minor;
++
++	// Debug context setup.
++	if (gl3_debugcontext && gl3_debugcontext->value && gl3config.debug_output)
++	{
++#ifdef YQ2_GL3_GLES
++		glDebugMessageCallbackKHR(DebugCallback, NULL);
++
++		// Call GL3_DebugCallback() synchronously, i.e. directly when and
++		// where the error happens (so we can get the cause in a backtrace)
++		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_KHR);
++#else // Desktop GL
++		glDebugMessageCallbackARB(DebugCallback, NULL);
++		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
++#endif
++	}
++
++	// Window title - set here so we can display renderer name in it.
++	char title[40] = {0};
++#ifdef YQ2_GL3_GLES3
++	snprintf(title, sizeof(title), "Yamagi Quake II %s - OpenGL ES 3.0", YQ2VERSION);
++#else
++	snprintf(title, sizeof(title), "Yamagi Quake II %s - OpenGL 3.2", YQ2VERSION);
++#endif
++	SDL_SetWindowTitle(window, title);
++
++#if SDL_VERSION_ATLEAST(2, 26, 0)
++	// Figure out if we are high dpi aware.
++	int flags = SDL_GetWindowFlags(win);
++#ifdef USE_SDL3
++	IsHighDPIaware = (flags & SDL_WINDOW_HIGH_PIXEL_DENSITY) ? true : false;
++#else
++	IsHighDPIaware = (flags & SDL_WINDOW_ALLOW_HIGHDPI) ? true : false;
++#endif
++#endif
++
++	return true;
++}
++
++/*
++ * Fills the actual size of the drawable into width and height.
++ */
++void GL3_GetDrawableSize(int* width, int* height)
++{
++#ifdef YQ2_ACAP
++	if (acap_overlay.width && acap_overlay.height)
++	{
++		*width = (int)acap_overlay.width;
++		*height = (int)acap_overlay.height;
++	}
++	else
++	{
++		SDL_GetWindowSize(window, width, height);
++	}
++#elif defined(USE_SDL3)
++	SDL_GetWindowSizeInPixels(window, width, height);
++#else
++	SDL_GL_GetDrawableSize(window, width, height);
++#endif
++}
++
++/*
++ * Shuts the GL context down.
++ */
++void GL3_ShutdownContext()
++{
++#ifdef YQ2_ACAP
++	if (acap_overlay_initialized)
++	{
++		overlay_context_destroy(&acap_overlay);
++		acap_overlay_initialized = false;
++	}
++
++	if (acap_gpu_initialized)
++	{
++		gpu_context_destroy(&acap_gpu);
++		acap_gpu_initialized = false;
++	}
++
++	window = NULL;
++#else
++	if (window)
++	{
++		if(context)
++		{
++#ifdef USE_SDL3
++			SDL_GL_DestroyContext(context);
++#else
++			SDL_GL_DeleteContext(context);
++#endif
++			context = NULL;
++		}
++	}
++#endif
++}
++
++qboolean
++GL3_BeginOutputFrame(void)
++{
++#ifdef YQ2_ACAP
++	return overlay_context_begin_frame(&acap_overlay, &acap_gpu);
++#else
++	return true;
++#endif
++}
++
++void
++GL3_BindOutputFramebuffer(void)
++{
++#ifdef YQ2_ACAP
++	overlay_context_bind_frame(&acap_overlay);
++#else
++	glBindFramebuffer(GL_FRAMEBUFFER, 0);
++#endif
++}
++
++/*
++ * Returns the SDL major version. Implemented
++ * here to not polute gl3_main.c with the SDL
++ * headers.
++ */
+ int GL3_GetSDLVersion()
+ {
+ #ifdef USE_SDL3
