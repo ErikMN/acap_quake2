@@ -10,7 +10,7 @@ diff --git a/Makefile b/Makefile
 -	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
 +$(BINDIR)/ref_gles3.so : $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS)
 +	@echo "===> LD $@"
-+	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS) $(LDLIBS) $(ACAP_GLES3_LDLIBS) $(SDLLDFLAGS) -o $@
++	${Q}$(CC) $(LDFLAGS) -Wl,-z,origin,-rpath='$$ORIGIN/lib' $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS) $(LDLIBS) $(ACAP_GLES3_LDLIBS) $(SDLLDFLAGS) -o $@
  endif
  
  # ref_soft.so
@@ -512,3 +512,101 @@ diff --git a/src/client/vid/glimp_sdl2.c b/src/client/vid/glimp_sdl2.c
  
  	Com_Printf("Drawable size: %ix%i\n", viddef.width, viddef.height);
  
+diff --git a/src/backends/unix/main.c b/src/backends/unix/main.c
+--- a/src/backends/unix/main.c
++++ b/src/backends/unix/main.c
+@@ -45,10 +45,49 @@
+ 	// register signal handler
+ 	registerHandler();
+ 
+-	// Setup FPU if necessary
+-	Sys_SetupFPU();
+-
+-	// Implement command line options that the rather
++	// Setup FPU if necessary
++	Sys_SetupFPU();
++
++#ifdef YQ2_ACAP
++	const char *acap_package_dir = Sys_GetBinaryDir();
++	const int acap_default_argc = 16;
++	char **acap_argv = calloc((size_t)argc + acap_default_argc + 1, sizeof(*acap_argv));
++
++	if (!acap_argv)
++	{
++		printf("Couldn't allocate ACAP command line.\n");
++		return 1;
++	}
++
++	int acap_argc = 0;
++	acap_argv[acap_argc++] = argv[0];
++	acap_argv[acap_argc++] = "-datadir";
++	acap_argv[acap_argc++] = (char *)acap_package_dir;
++	acap_argv[acap_argc++] = "+set";
++	acap_argv[acap_argc++] = "vid_ref";
++	acap_argv[acap_argc++] = "gles3";
++	acap_argv[acap_argc++] = "+set";
++	acap_argv[acap_argc++] = "vid_fullscreen";
++	acap_argv[acap_argc++] = "0";
++	acap_argv[acap_argc++] = "+set";
++	acap_argv[acap_argc++] = "r_msaa_samples";
++	acap_argv[acap_argc++] = "0";
++	acap_argv[acap_argc++] = "+set";
++	acap_argv[acap_argc++] = "r_vsync";
++	acap_argv[acap_argc++] = "0";
++	acap_argv[acap_argc++] = "+map";
++	acap_argv[acap_argc++] = "q2dm1";
++
++	for (int i = 1; i < argc; i++)
++	{
++		acap_argv[acap_argc++] = argv[i];
++	}
++
++	argc = acap_argc;
++	argv = acap_argv;
++#endif
++
++	// Implement command line options that the rather
+ 	// crappy argument parser can't parse.
+ 	for (int i = 0; i < argc; i++)
+ 	{
+@@ -135,8 +174,38 @@
+ 		return 1;
+ 	}
+ 
+-	// enforce C locale
+-	setenv("LC_ALL", "C", 1);
++#ifdef YQ2_ACAP
++	char acap_home[MAX_OSPATH];
++
++	if (snprintf(acap_home, sizeof(acap_home), "%slocaldata", acap_package_dir) >= (int)sizeof(acap_home))
++	{
++		printf("ACAP package path is too long.\n");
++		return 1;
++	}
++
++	if (mkdir(acap_home, 0755) != 0 && errno != EEXIST)
++	{
++		printf("Couldn't create %s: %s\n", acap_home, strerror(errno));
++		return 1;
++	}
++
++	if (setenv("HOME", acap_home, 1) != 0 ||
++		setenv("SDL_VIDEODRIVER", "dummy", 1) != 0 ||
++		setenv("SDL_AUDIODRIVER", "dummy", 1) != 0)
++	{
++		printf("Couldn't configure ACAP runtime environment: %s\n", strerror(errno));
++		return 1;
++	}
++
++	if (chdir(acap_package_dir) != 0)
++	{
++		printf("Couldn't change directory to %s: %s\n", acap_package_dir, strerror(errno));
++		return 1;
++	}
++#endif
++
++	// enforce C locale
++	setenv("LC_ALL", "C", 1);
+ 
+ 	/// Do not delay reads on stdin
+ 	if (fcntl(fileno(stdin), F_SETFL, fcntl(fileno(stdin), F_GETFL, NULL) | FNDELAY))

@@ -33,9 +33,9 @@ Axis video stream
 The current renderer runs at half the stream resolution and uses axoverlay2
 2x upscaling. A 1920x1080 stream therefore renders Quake II at 960x540.
 
-The EAP packages the launcher, Yamagi client, GLES3 renderer, SDL2 runtime,
-native `game.so`, and pinned Quake II demo game data. Starting the ACAP
-launches `q2dm1` directly.
+The EAP packages Yamagi as the ACAP executable, together with the GLES3
+renderer, SDL2 runtime, native `game.so`, and pinned Quake II demo game
+data. Starting the ACAP launches `q2dm1` directly.
 
 ## Clone
 
@@ -77,11 +77,23 @@ This builds SDL2 and Yamagi Quake II, downloads the pinned demo game data,
 and creates the EAP in the repository root.
 
 Install the EAP on the Axis device and start `ACAP Quake II`. No manual
-copying of `quake2`, `ref_gles3.so`, SDL2, `game.so`, or PAK files is
-required.
+copying of binaries, libraries, or PAK files is required.
 
-The application uses its ACAP `localdata` directory as Yamagi's writable
-home directory for configuration and other runtime files.
+The packaged `acap_quake2` executable is Yamagi itself. The ACAP-specific
+build uses `$ORIGIN/lib` for SDL2, selects the dummy SDL video and audio
+backends, uses the ACAP `localdata` directory as Yamagi's writable home,
+and starts `q2dm1`.
+
+For development on the target, stop the ACAP first and run:
+
+```sh
+cd /usr/local/packages/acap_quake2
+./run-quake2.sh
+```
+
+When run from a root shell, the script switches to the
+`acap-acap_quake2` package user and executes the same `acap_quake2`
+binary used by the ACAP service.
 
 ## Build Yamagi Quake II manually
 

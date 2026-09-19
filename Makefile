@@ -22,44 +22,9 @@ CONTAINER_SHELL_CMD := $(CONTAINER_RUNTIME) run -it \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
-SRCS := src/main.c
-OBJS := $(SRCS:.c=.o)
-
-CFLAGS += -DAPP_NAME=\"$(PROG)\"
-CFLAGS += -Wall
-CFLAGS += -Wextra
-CFLAGS += -Wformat=2
-CFLAGS += -Wpointer-arith
-CFLAGS += -Wvla
-
 FINAL ?= y
 
-ifeq ($(FINAL),y)
-	CFLAGS += -DNDEBUG -O2
-	LDFLAGS += -s
-else
-	CFLAGS += -DDEBUG -g3
-endif
-
-.DEFAULT_GOAL := all
-
-.PHONY: all
-all: $(PROG)
-
-ifdef OECORE_SDK_VERSION
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(PROG): $(OBJS)
-	$(CC) $(LDFLAGS) $^ -o $@
-
-else
-
-$(PROG):
-	$(error Build $(PROG) inside the ACAP SDK container)
-
-endif
+.DEFAULT_GOAL := build
 
 .PHONY: image
 image:
@@ -69,8 +34,7 @@ image:
 		./oci
 
 .PHONY: build
-build:
-	$(CONTAINER_CMD) ./oci/build.sh $(FINAL)
+build: yquake2-client
 
 .PHONY: eap
 eap: yquake2-client
@@ -100,5 +64,5 @@ indent:
 
 .PHONY: clean
 clean:
-	$(RM) $(PROG) $(OBJS) *.eap *_LICENSE.txt
+	$(RM) *.eap *_LICENSE.txt
 	$(RM) package.conf package.conf.orig param.conf

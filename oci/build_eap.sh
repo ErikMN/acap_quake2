@@ -72,17 +72,14 @@ for file in \
   fi
 done
 
-make clean
-FINAL="$FINAL" make -j"$(nproc)"
-
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR/baseq2" "$STAGE_DIR/lib"
 
-cp "$ROOT/acap_quake2" "$STAGE_DIR/acap_quake2"
+cp "$YQ2_DIR/release/quake2" "$STAGE_DIR/acap_quake2"
 cp "$ROOT/manifest.json" "$STAGE_DIR/manifest.json"
 cp "$ROOT/LICENSE" "$STAGE_DIR/LICENSE"
-
-cp "$YQ2_DIR/release/quake2" "$STAGE_DIR/quake2"
+cp "$ROOT/scripts/run-quake2.sh" "$STAGE_DIR/run-quake2.sh"
+chmod 0755 "$STAGE_DIR/run-quake2.sh"
 cp "$YQ2_DIR/release/ref_gles3.so" "$STAGE_DIR/ref_gles3.so"
 cp "$YQ2_DIR/release/baseq2/game.so" "$STAGE_DIR/baseq2/game.so"
 cp -L "$SDL_PREFIX/lib/libSDL2-2.0.so.0" "$STAGE_DIR/lib/libSDL2-2.0.so.0"
@@ -115,8 +112,8 @@ EOF
   cd "$STAGE_DIR"
 
   acap-build . \
-    -a quake2 \
     -a ref_gles3.so \
+    -a run-quake2.sh \
     -a baseq2/game.so \
     -a baseq2/pak0.pak \
     -a baseq2/pak1.pak \

@@ -19,14 +19,16 @@ fi
 
 export PATH="$SDL_PREFIX/bin:$PATH"
 
-if git -C "$YQ2_DIR" apply --check "$PATCH_FILE"; then
-  git -C "$YQ2_DIR" apply "$PATCH_FILE"
-elif git -C "$YQ2_DIR" apply --reverse --check "$PATCH_FILE"; then
-  echo "Yamagi ACAP patch already applied"
-else
+# The ACAP changes are maintained as a patch outside the Yamagi submodule.
+# Restore the pinned revision before applying it so repeated builds start clean.
+git -C "$YQ2_DIR" reset --hard HEAD
+
+if ! git -C "$YQ2_DIR" apply --check "$PATCH_FILE"; then
   echo "Yamagi ACAP patch does not apply cleanly."
   exit 1
 fi
+
+git -C "$YQ2_DIR" apply "$PATCH_FILE"
 
 echo "Building Yamagi Quake II client"
 echo "ACAP SDK: $OECORE_SDK_VERSION"
@@ -73,8 +75,8 @@ file "$YQ2_DIR/release/baseq2/game.so"
 
 echo
 echo "quake2 dependencies:"
-readelf -d "$YQ2_DIR/release/quake2" | grep NEEDED || true
+readelf -d "$YQ2_DIR/release/quake2" | grep -E 'NEEDED|RPATH|RUNPATH' || true
 
 echo
 echo "ref_gles3.so dependencies:"
-readelf -d "$YQ2_DIR/release/ref_gles3.so" | grep NEEDED || true
+readelf -d "$YQ2_DIR/release/ref_gles3.so" | grep -E 'NEEDED|RPATH|RUNPATH' || true
