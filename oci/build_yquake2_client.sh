@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$PWD"
 YQ2_DIR="$ROOT/third_party/yquake2"
 SDL_PREFIX="$ROOT/build/sdl2-install"
+LWS_PREFIX="$ROOT/build/libwebsockets-install"
 CONFIG_FILE="$ROOT/yquake2-acap.mk"
 PATCH_FILE="$ROOT/patches/yquake2-acap.patch"
 ACAP_BUILD_DIR="$ROOT/build/yquake2-acap"
@@ -14,6 +15,12 @@ ACAP_PKGS="egl glesv2 vdostream axoverlay2"
 if [ ! -x "$SDL_PREFIX/bin/sdl2-config" ]; then
   echo "SDL2 has not been built."
   echo "Run make sdl2 first."
+  exit 1
+fi
+
+if [ ! -f "$LWS_PREFIX/lib/libwebsockets.a" ]; then
+  echo "libwebsockets has not been built."
+  echo "Run make libwebsockets first."
   exit 1
 fi
 
@@ -36,6 +43,7 @@ echo "Compiler: $CC"
 echo "SDL2: $(sdl2-config --version)"
 echo "SDL2 cflags: $(sdl2-config --cflags)"
 echo "SDL2 libs: $(sdl2-config --libs)"
+echo "libwebsockets: $(PKG_CONFIG_PATH="$LWS_PREFIX/lib/pkgconfig" pkg-config --modversion libwebsockets)"
 
 make -C "$YQ2_DIR" cleanall
 
@@ -55,6 +63,12 @@ read -r -a ACAP_CFLAGS <<< "$(pkg-config --cflags $ACAP_PKGS)"
 ACAP_GLES3_OBJS="$ACAP_BUILD_DIR/gpu_context.o $ACAP_BUILD_DIR/overlay.o"
 ACAP_GLES3_LDLIBS="$(pkg-config --libs $ACAP_PKGS)"
 
+LWS_LDLIBS="$(PKG_CONFIG_PATH="$LWS_PREFIX/lib/pkgconfig" pkg-config --static --libs libwebsockets)"
+LWS_ARCHIVE="$LWS_PREFIX/lib/libwebsockets.a"
+ACAP_CLIENT_LDLIBS="${LWS_LDLIBS/-lwebsockets/$LWS_ARCHIVE}"
+
+echo "libwebsockets link flags: $ACAP_CLIENT_LDLIBS"
+
 make \
   -C "$YQ2_DIR" \
   -j"$(nproc)" \
@@ -62,6 +76,7 @@ make \
   INCLUDE="-I$SDL_PREFIX/include -I$ROOT/src -DYQ2_ACAP" \
   ACAP_GLES3_OBJS="$ACAP_GLES3_OBJS" \
   ACAP_GLES3_LDLIBS="$ACAP_GLES3_LDLIBS" \
+  ACAP_CLIENT_LDLIBS="$ACAP_CLIENT_LDLIBS" \
   client \
   ref_gles3 \
   game

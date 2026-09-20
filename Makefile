@@ -48,12 +48,16 @@ shell:
 sdl2:
 	$(CONTAINER_CMD) ./oci/build_sdl2.sh
 
+.PHONY: libwebsockets
+libwebsockets:
+	$(CONTAINER_CMD) ./oci/build_libwebsockets.sh
+
 .PHONY: yquake2-core
 yquake2-core:
 	$(CONTAINER_CMD) ./oci/build_yquake2.sh
 
 .PHONY: yquake2-client
-yquake2-client: sdl2
+yquake2-client: sdl2 libwebsockets
 	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh
 
 # Run clang format in Docker:

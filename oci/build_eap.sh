@@ -86,6 +86,7 @@ cp -L "$SDL_PREFIX/lib/libSDL2-2.0.so.0" "$STAGE_DIR/lib/libSDL2-2.0.so.0"
 
 cp "$YQ2_DIR/LICENSE" "$STAGE_DIR/YAMAGI_LICENSE.txt"
 cp "$ROOT/third_party/SDL2/LICENSE.txt" "$STAGE_DIR/SDL2_LICENSE.txt"
+cp "$ROOT/third_party/libwebsockets/LICENSE" "$STAGE_DIR/LIBWEBSOCKETS_LICENSE.txt"
 cp "$ROOT/THIRD_PARTY_DATA.md" "$STAGE_DIR/THIRD_PARTY_DATA.md"
 
 echo "Fetching pinned Quake II demo data"
@@ -120,6 +121,7 @@ EOF
     -a baseq2/pak2.pak \
     -a YAMAGI_LICENSE.txt \
     -a SDL2_LICENSE.txt \
+    -a LIBWEBSOCKETS_LICENSE.txt \
     -a DEMO_DATA_SOURCE.md \
     -a THIRD_PARTY_DATA.md
 )

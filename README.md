@@ -144,6 +144,16 @@ SDL2 is included as a pinned Git submodule under:
 third_party/SDL2
 ```
 
+libwebsockets v4.3.3 is included as a pinned Git submodule under:
+
+```text
+third_party/libwebsockets
+```
+
+It is cross-compiled as a minimal static library without TLS or zlib. Axis
+will terminate HTTPS/WSS at the ACAP reverse proxy once the WebSocket input
+endpoint is added.
+
 ACAP-specific Yamagi changes are kept outside the upstream source tree in:
 
 ```text
@@ -166,6 +176,7 @@ GPL license of this project.
 
 This project is licensed under the GNU General Public License version 2.
 
-Yamagi Quake II, SDL2, and the Quake II demo data retain their respective
-copyright and license terms. The EAP includes the Yamagi and SDL2 licenses,
-plus the pinned demo-data source README and provenance information.
+Yamagi Quake II, SDL2, libwebsockets, and the Quake II demo data retain
+their respective copyright and license terms. The EAP includes the Yamagi,
+SDL2, and libwebsockets licenses, plus the pinned demo-data source README
+and provenance information.

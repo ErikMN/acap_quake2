@@ -1,6 +1,14 @@
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
+@@ -1324,6 +1324,6 @@
+ $(BINDIR)/quake2 : $(CLIENT_OBJS)
+ 	@echo "===> LD $@"
+-	${Q}$(CC) $(LDFLAGS) $(CLIENT_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
++	${Q}$(CC) $(LDFLAGS) $(CLIENT_OBJS) $(LDLIBS) $(ACAP_CLIENT_LDLIBS) $(SDLLDFLAGS) -o $@
+ endif
+ 
+ # q2ded
 @@ -1392,9 +1392,9 @@
  	@echo "===> LD $@"
  	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
