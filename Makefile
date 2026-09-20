@@ -18,13 +18,47 @@ CONTAINER_CMD := $(CONTAINER_RUNTIME) run -i \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
+CONTAINER_TARGET_CMD := $(CONTAINER_RUNTIME) run -i \
+	$(CONTAINER_ARGS) \
+	-e TARGET_IP=$(TARGET_IP) \
+	-e TARGET_USR=$(TARGET_USR) \
+	-e TARGET_PWD=$(TARGET_PWD) \
+	$(DOCKER_TAG)
+
 CONTAINER_SHELL_CMD := $(CONTAINER_RUNTIME) run -it \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
 FINAL ?= y
 
+include helpers.mak
+
 .DEFAULT_GOAL := build
+
+.PHONY: help
+help:
+	@echo "Available targets:"
+	@echo "  acap           Build the complete ACAP package from a fresh checkout"
+	@echo "  image          Build the ACAP SDK container image"
+	@echo "  build          Build the Quake II client"
+	@echo "  eap            Build the client, web UI, and EAP"
+	@echo "  web            Build the production web UI"
+	@echo "  webdev         Run the local Vite development server"
+	@echo "  install        Build and install the EAP on the target device"
+	@echo "  deploy         Deploy only the Quake II executable"
+	@echo "  deployweb      Deploy only the built web UI"
+	@echo "  deployprofile  Deploy the development shell profile"
+	@echo "  logon          Open a shell in the installed ACAP directory"
+	@echo "  log            Follow target journal logs"
+	@echo "  kill           Force-stop the running ACAP process"
+	@echo "  checksdk       Print target embedded SDK information"
+	@echo "  openweb        Open the ACAP setting page in a browser"
+	@echo "  shell          Open an interactive ACAP SDK container"
+	@echo "  containerlist  List the Quake II build image"
+	@echo "  containerrun   Alias for shell"
+	@echo "  containerprune Remove stopped containers"
+	@echo "  clean          Remove generated package and web build files"
+	@echo "  distclean      Remove all generated build artifacts"
 
 .PHONY: submodules
 submodules:
@@ -58,6 +92,10 @@ webdev:
 eap: yquake2-client web
 	$(CONTAINER_CMD) ./oci/build_eap.sh $(FINAL)
 
+.PHONY: install
+install: checktarget eap
+	$(CONTAINER_TARGET_CMD) ./oci/eap-install.sh
+
 .PHONY: shell
 shell:
 	$(CONTAINER_SHELL_CMD) bash
@@ -89,3 +127,13 @@ clean:
 	$(RM) *.eap *_LICENSE.txt
 	$(RM) package.conf package.conf.orig param.conf
 	$(RM) -r web/build
+
+
+.PHONY: distclean
+distclean: clean
+	$(RM) -r build
+	$(RM) -r debug release html tmp*
+	$(RM) -r web/node_modules web/src/assets/etc
+	$(RM) -r third_party/yquake2/build
+	$(RM) -r third_party/yquake2/debug
+	$(RM) -r third_party/yquake2/release

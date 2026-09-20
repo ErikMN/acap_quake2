@@ -73,6 +73,7 @@ def trace_journalctl_ssh(username, password, args):
 
         # Connect to the remote server:
         ssh_client.connect(os.environ['TARGET_IP'],
+                           port=int(os.environ.get('TARGET_SSH_PORT', '22')),
                            username=username, password=password)
 
         # Check if the 'journalctl' command is available on the remote server:
@@ -105,7 +106,7 @@ def trace_journalctl_ssh(username, password, args):
                 print(ANSI_RED + log + ANSI_RESET)
             elif "sdk" in log:
                 print(ANSI_BG_GREEN + log + ANSI_RESET)
-            elif "acap_doom" in log:
+            elif "acap_quake2" in log:
                 print(ANSI_BLUE + log + ANSI_RESET)
             elif "sshd" in log:
                 print(ANSI_GREEN + log + ANSI_RESET)

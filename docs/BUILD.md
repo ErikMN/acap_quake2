@@ -10,6 +10,9 @@ The host system needs:
 - GNU Make
 - Docker
 
+Target deployment helpers additionally use `sshpass`. The `make log` helper
+uses Python 3 with Paramiko.
+
 Node.js and Yarn are only required on the host when running the web development
 server. The ACAP build image contains its own Node.js and Yarn installation.
 
@@ -201,10 +204,65 @@ cd /usr/local/packages/acap_quake2
 
 When launched from a root shell, the helper switches to the ACAP package user and executes the same `acap_quake2` binary used by the service.
 
+
+### Target helper commands
+
+First configure the target in the current shell:
+
+```sh
+source ./setuptarget.sh
+```
+
+To build and install a complete EAP on the configured target:
+
+```sh
+make install
+```
+
+For fast native-code iteration, rebuild and copy only the Quake II executable
+into an already installed ACAP:
+
+```sh
+make deploy
+```
+
+For frontend iteration without reinstalling the EAP, build and copy only the
+web assets:
+
+```sh
+make deployweb
+```
+
+Other target helpers:
+
+```sh
+make logon
+make log
+make kill
+make checksdk
+make openweb
+make deployprofile
+```
+
+The deployment helpers use `TARGET_SSH_PORT` from `setuptarget.sh`.
+`TARGET_DIR` defaults to `/usr/local/packages/acap_quake2` and can be
+overridden on the make command line if needed.
+
 ## Cleaning
 
 ```sh
 make clean
 ```
 
-Removes generated EAP/package files from the repository root. Build directories under `build/` are intentionally left available for development and can be removed manually when a completely clean rebuild is required.
+Removes generated EAP/package files and the production web build while keeping
+compiled dependencies available for fast development rebuilds.
+
+To remove all generated build artifacts:
+
+```sh
+make distclean
+```
+
+This additionally removes the root `build/` tree, web dependencies and
+generated web metadata, and Yamagi Quake II build, debug, and release output.
+Source files, credentials, and the pinned submodules themselves are preserved.
