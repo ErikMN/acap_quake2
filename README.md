@@ -2,181 +2,57 @@
 
 Yamagi Quake II running as an ACAP application on Axis devices.
 
-Initial target:
+The project targets aarch64 Axis devices based on ARTPEC-8 and newer. Quake II is rendered with OpenGL ES 3 through axoverlay2 and appears directly in the Axis video stream.
 
-- ARTPEC-8 and newer
-- aarch64
-- ACAP Native SDK 12.11
-- OpenGL ES 3
-- axoverlay2
+## Status
 
-## Current status
+The game currently runs on Axis hardware with:
 
-The Yamagi Quake II client is running on Axis hardware using:
+- Yamagi Quake II as the ACAP executable
+- GPU rendering through EGL and OpenGL ES 3
+- axoverlay2 output into the camera video stream
+- native `game.so`
+- packaged SDL2 runtime
+- statically linked libwebsockets
+- pinned Quake II demo data fetched during the build
+- direct ACAP start and stop support
 
-```text
-Yamagi Quake II
-      |
-      v
-OpenGL ES 3
-      |
-      v
-EGL
-      |
-      v
-axoverlay2 DMA-BUF
-      |
-      v
-Axis video stream
-```
+Keyboard and mouse input through the browser is the next development step.
 
-The current renderer runs at half the stream resolution and uses axoverlay2
-2x upscaling. A 1920x1080 stream therefore renders Quake II at 960x540.
+## Build
 
-The EAP packages Yamagi as the ACAP executable, together with the GLES3
-renderer, SDL2 runtime, native `game.so`, and pinned Quake II demo game
-data. Starting the ACAP launches `q2dm1` directly.
+Requirements:
 
-## Clone
+- Git
+- GNU Make
+- Docker
 
-Clone the repository including submodules:
+Clone the repository and build the complete ACAP package:
 
 ```sh
-git clone --recurse-submodules <repository-url>
+git clone https://github.com/ErikMN/acap_quake2.git
+cd acap_quake2
+make acap
 ```
 
-If the repository was cloned without submodules:
+`make acap` initializes the pinned submodules, builds the ACAP SDK container image, builds all application dependencies, and produces an installable `.eap` file in the repository root.
 
-```sh
-git submodule update --init --recursive
-```
+For build details, individual targets, and development workflows, see [docs/BUILD.md](docs/BUILD.md).
 
-## Build environment
+## Install
 
-Build the ACAP SDK container image:
+Install the generated EAP from the Axis device web interface under **Apps**, then start **ACAP Quake II**.
 
-```sh
-make image
-```
-
-Open a shell inside the ACAP SDK container:
-
-```sh
-make shell
-```
-
-## Build the EAP
-
-Build the complete application package:
-
-```sh
-make eap
-```
-
-This builds SDL2 and Yamagi Quake II, downloads the pinned demo game data,
-and creates the EAP in the repository root.
-
-Install the EAP on the Axis device and start `ACAP Quake II`. No manual
-copying of binaries, libraries, or PAK files is required.
-
-The packaged `acap_quake2` executable is Yamagi itself. The ACAP-specific
-build uses `$ORIGIN/lib` for SDL2, selects the dummy SDL video and audio
-backends, uses the ACAP `localdata` directory as Yamagi's writable home,
-and starts `q2dm1`.
-
-For development on the target, stop the ACAP first and run:
-
-```sh
-cd /usr/local/packages/acap_quake2
-./run-quake2.sh
-```
-
-When run from a root shell, the script switches to the
-`acap-acap_quake2` package user and executes the same `acap_quake2`
-binary used by the ACAP service.
-
-## Build Yamagi Quake II manually
-
-Build SDL2 for the ACAP target:
-
-```sh
-make sdl2
-```
-
-Cross-compile the Yamagi Quake II core components:
-
-```sh
-make yquake2-core
-```
-
-This builds:
-
-```text
-third_party/yquake2/release/q2ded
-third_party/yquake2/release/baseq2/game.so
-```
-
-Cross-compile the Yamagi Quake II client, GLES3 renderer, and game library:
-
-```sh
-make yquake2-client
-```
-
-This builds:
-
-```text
-third_party/yquake2/release/quake2
-third_party/yquake2/release/ref_gles3.so
-third_party/yquake2/release/baseq2/game.so
-```
-
-## Third-party sources
-
-Yamagi Quake II is included as a pinned Git submodule under:
-
-```text
-third_party/yquake2
-```
-
-SDL2 is included as a pinned Git submodule under:
-
-```text
-third_party/SDL2
-```
-
-libwebsockets v4.3.3 is included as a pinned Git submodule under:
-
-```text
-third_party/libwebsockets
-```
-
-It is cross-compiled as a minimal static library without TLS or zlib. Axis
-will terminate HTTPS/WSS at the ACAP reverse proxy once the WebSocket input
-endpoint is added.
-
-ACAP-specific Yamagi changes are kept outside the upstream source tree in:
-
-```text
-patches/yquake2-acap.patch
-yquake2-acap.mk
-```
+Starting the ACAP launches Quake II directly.
 
 ## Game data
 
-Quake II PAK files are not committed to this repository.
+Quake II PAK files are not stored in this repository. The build downloads pinned demo data and verifies it before packaging.
 
-The EAP build fetches the pinned game data from `drags/docker-quake2`
-and verifies the expected Git blob IDs before packaging it. See
-`THIRD_PARTY_DATA.md` for the exact source revisions and provenance.
-
-The game data remains copyrighted by id Software and is not covered by the
-GPL license of this project.
+See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for source and provenance information.
 
 ## License
 
 This project is licensed under the GNU General Public License version 2.
 
-Yamagi Quake II, SDL2, libwebsockets, and the Quake II demo data retain
-their respective copyright and license terms. The EAP includes the Yamagi,
-SDL2, and libwebsockets licenses, plus the pinned demo-data source README
-and provenance information.
+Yamagi Quake II, SDL2, libwebsockets, and the Quake II demo data retain their respective copyright and license terms.

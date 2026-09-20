@@ -1,0 +1,181 @@
+# Building ACAP Quake II
+
+This document describes the build setup and development targets for ACAP Quake II.
+
+## Requirements
+
+The host system needs:
+
+- Git
+- GNU Make
+- Docker
+
+The ACAP toolchain and target libraries are provided by the Docker image built from `oci/Dockerfile`.
+
+## Complete build
+
+For a fresh clone, the recommended command is:
+
+```sh
+make acap
+```
+
+The `acap` target runs these steps in order:
+
+```text
+submodules
+    |
+    v
+ACAP SDK Docker image
+    |
+    v
+SDL2
+    |
+    v
+libwebsockets
+    |
+    v
+Yamagi Quake II
+    |
+    v
+EAP packaging
+```
+
+The result is an `.eap` file in the repository root.
+
+The submodule step uses:
+
+```sh
+git submodule update --init --recursive
+```
+
+so a normal Git clone is sufficient.
+
+## Build targets
+
+### Complete ACAP package
+
+```sh
+make acap
+```
+
+Initializes submodules, builds the SDK image, and builds the final EAP.
+
+### SDK image
+
+```sh
+make image
+```
+
+Builds the aarch64 ACAP Native SDK container image used by the other build targets.
+
+This normally only needs to be rerun when `oci/Dockerfile` or the SDK configuration changes.
+
+### EAP only
+
+```sh
+make eap
+```
+
+Builds the application and packages the EAP using an already-built SDK image.
+
+During normal development this is usually the fastest complete build command.
+
+### SDL2
+
+```sh
+make sdl2
+```
+
+Cross-compiles the pinned SDL2 submodule into:
+
+```text
+build/sdl2-install
+```
+
+### libwebsockets
+
+```sh
+make libwebsockets
+```
+
+Cross-compiles the pinned libwebsockets submodule as a static library into:
+
+```text
+build/libwebsockets-install
+```
+
+The build disables TLS and zlib support because external HTTPS/WSS termination is handled by the Axis platform.
+
+### Yamagi Quake II client
+
+```sh
+make yquake2-client
+```
+
+Builds:
+
+```text
+third_party/yquake2/release/quake2
+third_party/yquake2/release/ref_gles3.so
+third_party/yquake2/release/baseq2/game.so
+```
+
+The ACAP build patches Yamagi at build time from:
+
+```text
+patches/yquake2-acap.patch
+```
+
+The pinned Yamagi submodule is reset before the patch is applied so repeated builds start from the same upstream revision.
+
+### Yamagi core
+
+```sh
+make yquake2-core
+```
+
+Builds the dedicated server and native game library without the full client path.
+
+### SDK shell
+
+```sh
+make shell
+```
+
+Opens an interactive shell in the ACAP SDK container.
+
+## Dependency layout
+
+Pinned source dependencies are stored as Git submodules:
+
+```text
+third_party/yquake2
+third_party/SDL2
+third_party/libwebsockets
+```
+
+Generated build artifacts are kept under `build/` and are not committed.
+
+The EAP build also fetches pinned Quake II demo PAK files and verifies their expected Git blob IDs before packaging them. See `THIRD_PARTY_DATA.md` for the exact source information.
+
+## Target-side development
+
+After installing the EAP, the normal production path is to start **ACAP Quake II** from the Axis application interface.
+
+For manual development on the device, stop the ACAP first and run:
+
+```sh
+cd /usr/local/packages/acap_quake2
+./run-quake2.sh
+```
+
+When launched from a root shell, the helper switches to the ACAP package user and executes the same `acap_quake2` binary used by the service.
+
+## Cleaning
+
+```sh
+make clean
+```
+
+Removes generated EAP/package files from the repository root. Build directories under `build/` are intentionally left available for development and can be removed manually when a completely clean rebuild is required.

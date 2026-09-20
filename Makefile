@@ -26,6 +26,16 @@ FINAL ?= y
 
 .DEFAULT_GOAL := build
 
+.PHONY: submodules
+submodules:
+	git submodule update --init --recursive
+
+.PHONY: acap
+acap:
+	$(MAKE) submodules
+	$(MAKE) image
+	$(MAKE) eap
+
 .PHONY: image
 image:
 	$(CONTAINER_RUNTIME) build \
