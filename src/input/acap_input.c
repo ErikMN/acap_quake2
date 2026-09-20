@@ -1,10 +1,27 @@
 #include "acap_input.h"
 
+#include "input_protocol.h"
 #include "websocket.h"
 
 #include <syslog.h>
 
 static struct acap_input_queue input_queue;
+
+static void
+enqueue_event(struct acap_input_queue *queue, const struct acap_input_event *event)
+{
+  if (acap_input_queue_push(queue, event)) {
+    return;
+  }
+
+  const struct acap_input_event reset = {
+    .type = ACAP_INPUT_EVENT_RESET,
+  };
+
+  syslog(LOG_WARNING, "ACAP input: input queue full, resetting queued input");
+  acap_input_queue_clear(queue);
+  acap_input_queue_push(queue, &reset);
+}
 
 static void
 enqueue_reset(void *user)
@@ -14,13 +31,21 @@ enqueue_reset(void *user)
     .type = ACAP_INPUT_EVENT_RESET,
   };
 
-  if (acap_input_queue_push(queue, &event)) {
+  enqueue_event(queue, &event);
+}
+
+static void
+receive_message(const uint8_t *data, size_t len, void *user)
+{
+  struct acap_input_queue *queue = user;
+  struct acap_input_event event;
+
+  if (!acap_input_protocol_decode(data, len, &event)) {
+    syslog(LOG_WARNING, "ACAP input: invalid input packet");
     return;
   }
 
-  syslog(LOG_WARNING, "ACAP input: input queue full, resetting queued input");
-  acap_input_queue_clear(queue);
-  acap_input_queue_push(queue, &event);
+  enqueue_event(queue, &event);
 }
 
 bool
@@ -29,6 +54,7 @@ acap_input_init(void)
   const struct acap_websocket_callbacks callbacks = {
     .connected = enqueue_reset,
     .disconnected = enqueue_reset,
+    .message = receive_message,
   };
 
   if (!acap_input_queue_init(&input_queue)) {

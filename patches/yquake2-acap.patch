@@ -558,17 +558,30 @@ diff --git a/src/client/vid/vid.c b/src/client/vid/vid.c
 diff --git a/src/client/input/sdl2.c b/src/client/input/sdl2.c
 --- a/src/client/input/sdl2.c
 +++ b/src/client/input/sdl2.c
-@@ -37,5 +37,9 @@
+@@ -37,5 +37,10 @@
  #include <SDL2/SDL.h>
  
 +#ifdef YQ2_ACAP
 +#include "input/acap_input.h"
++#include "input/yamagi_input.h"
 +#endif
 +
  #include "header/input.h"
  #include "header/gyro.h"
  #include "../header/keyboard.h"
-@@ -2947,5 +2951,12 @@
+@@ -845,6 +850,11 @@
+ void
+ IN_Update(void)
+ {
++#ifdef YQ2_ACAP
++	acap_yamagi_input_update(
++		&mouse_x, &mouse_y, cls.key_dest == key_game && (int)cl_paused->value == 0);
++#endif
++
+ 	qboolean want_grab;
+ 	SDL_Event event;
+ 	unsigned int key;
+@@ -2947,5 +2957,12 @@
  	SDL_StartTextInput();
  
  	IN_Controller_Init(false);
@@ -581,7 +594,7 @@ diff --git a/src/client/input/sdl2.c b/src/client/input/sdl2.c
 +#endif
 +
  	Com_Printf("------------------------------------\n\n");
-@@ -2994,5 +3005,9 @@
+@@ -2994,5 +3011,9 @@
  IN_Shutdown(void)
  {
 +#ifdef YQ2_ACAP

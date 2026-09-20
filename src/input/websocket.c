@@ -46,6 +46,21 @@ websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user
 
     case LWS_CALLBACK_RECEIVE:
       syslog(LOG_INFO, "ACAP input: WebSocket received %zu bytes", len);
+
+      if (!lws_frame_is_binary(wsi)) {
+        syslog(LOG_WARNING, "ACAP input: ignoring non-binary WebSocket message");
+        break;
+      }
+
+      if (!lws_is_first_fragment(wsi) || !lws_is_final_fragment(wsi) ||
+          lws_remaining_packet_payload(wsi) != 0) {
+        syslog(LOG_WARNING, "ACAP input: ignoring fragmented WebSocket message");
+        break;
+      }
+
+      if (server.callbacks.message) {
+        server.callbacks.message(in, len, server.callback_user);
+      }
       break;
 
     case LWS_CALLBACK_CLOSED:
