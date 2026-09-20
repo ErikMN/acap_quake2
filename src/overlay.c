@@ -456,8 +456,7 @@ create_render_target(struct overlay_context *overlay)
 
   glGenRenderbuffers(1, &overlay->render_depth_stencil);
   glBindRenderbuffer(GL_RENDERBUFFER, overlay->render_depth_stencil);
-  glRenderbufferStorage(
-      GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->width, (GLsizei)overlay->height);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->width, (GLsizei)overlay->height);
   glFramebufferRenderbuffer(
       GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, overlay->render_depth_stencil);
 

@@ -28,63 +28,59 @@ static struct websocket_server_state server = {
 };
 
 static int
-websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in,
-                   size_t len)
+websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len)
 {
   (void)wsi;
   (void)user;
   (void)in;
 
   switch (reason) {
-    case LWS_CALLBACK_ESTABLISHED:
-      syslog(LOG_INFO, "ACAP input: WebSocket client connected");
+  case LWS_CALLBACK_ESTABLISHED:
+    syslog(LOG_INFO, "ACAP input: WebSocket client connected");
 
-      if (server.callbacks.connected) {
-        server.callbacks.connected(server.callback_user);
-      }
+    if (server.callbacks.connected) {
+      server.callbacks.connected(server.callback_user);
+    }
+    break;
+
+  case LWS_CALLBACK_RECEIVE:
+    if (!lws_frame_is_binary(wsi)) {
+      syslog(LOG_WARNING, "ACAP input: ignoring non-binary WebSocket message");
       break;
+    }
 
-    case LWS_CALLBACK_RECEIVE:
-      if (!lws_frame_is_binary(wsi)) {
-        syslog(LOG_WARNING, "ACAP input: ignoring non-binary WebSocket message");
-        break;
-      }
-
-      if (!lws_is_first_fragment(wsi) || !lws_is_final_fragment(wsi) ||
-          lws_remaining_packet_payload(wsi) != 0) {
-        syslog(LOG_WARNING, "ACAP input: ignoring fragmented WebSocket message");
-        break;
-      }
-
-      if (server.callbacks.message) {
-        server.callbacks.message(in, len, server.callback_user);
-      }
+    if (!lws_is_first_fragment(wsi) || !lws_is_final_fragment(wsi) || lws_remaining_packet_payload(wsi) != 0) {
+      syslog(LOG_WARNING, "ACAP input: ignoring fragmented WebSocket message");
       break;
+    }
 
-    case LWS_CALLBACK_CLOSED:
-      syslog(LOG_INFO, "ACAP input: WebSocket client disconnected");
+    if (server.callbacks.message) {
+      server.callbacks.message(in, len, server.callback_user);
+    }
+    break;
 
-      if (server.callbacks.disconnected) {
-        server.callbacks.disconnected(server.callback_user);
-      }
-      break;
+  case LWS_CALLBACK_CLOSED:
+    syslog(LOG_INFO, "ACAP input: WebSocket client disconnected");
 
-    default:
-      break;
+    if (server.callbacks.disconnected) {
+      server.callbacks.disconnected(server.callback_user);
+    }
+    break;
+
+  default:
+    break;
   }
 
   return 0;
 }
 
-static const struct lws_protocols protocols[] = {
-  {
-    .name = "acap-input",
-    .callback = websocket_callback,
-    .per_session_data_size = 0,
-    .rx_buffer_size = 0,
-  },
-  LWS_PROTOCOL_LIST_TERM
-};
+static const struct lws_protocols protocols[] = { {
+                                                      .name = "acap-input",
+                                                      .callback = websocket_callback,
+                                                      .per_session_data_size = 0,
+                                                      .rx_buffer_size = 0,
+                                                  },
+                                                  LWS_PROTOCOL_LIST_TERM };
 
 static void *
 websocket_thread(void *arg)
@@ -119,8 +115,7 @@ websocket_thread(void *arg)
     return NULL;
   }
 
-  syslog(LOG_INFO, "ACAP input: WebSocket server listening on 127.0.0.1:%d",
-         ACAP_WEBSOCKET_PORT);
+  syslog(LOG_INFO, "ACAP input: WebSocket server listening on 127.0.0.1:%d", ACAP_WEBSOCKET_PORT);
 
   for (;;) {
     bool stop_requested;
@@ -167,7 +162,7 @@ acap_websocket_start(const struct acap_websocket_callbacks *callbacks, void *use
   }
 
   server.context = NULL;
-  server.callbacks = callbacks ? *callbacks : (struct acap_websocket_callbacks){0};
+  server.callbacks = callbacks ? *callbacks : (struct acap_websocket_callbacks) { 0 };
   server.callback_user = user;
   server.startup_complete = false;
   server.running = false;
@@ -233,7 +228,7 @@ acap_websocket_stop(void)
 
   pthread_mutex_lock(&server.mutex);
   server.context = NULL;
-  server.callbacks = (struct acap_websocket_callbacks){0};
+  server.callbacks = (struct acap_websocket_callbacks) { 0 };
   server.callback_user = NULL;
   server.thread_created = false;
   server.startup_complete = false;

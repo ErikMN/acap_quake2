@@ -25,48 +25,48 @@ translate_key(enum acap_key_code code, int *key, bool *special)
   *special = true;
 
   switch (code) {
-    case ACAP_KEY_ESCAPE:
-      *key = K_ESCAPE;
-      return true;
-    case ACAP_KEY_TAB:
-      *key = K_TAB;
-      return true;
-    case ACAP_KEY_ENTER:
-      *key = K_ENTER;
-      return true;
-    case ACAP_KEY_SPACE:
-      *key = K_SPACE;
-      *special = false;
-      return true;
-    case ACAP_KEY_BACKSPACE:
-      *key = K_BACKSPACE;
-      return true;
-    case ACAP_KEY_SHIFT_LEFT:
-    case ACAP_KEY_SHIFT_RIGHT:
-      *key = K_SHIFT;
-      return true;
-    case ACAP_KEY_CTRL_LEFT:
-    case ACAP_KEY_CTRL_RIGHT:
-      *key = K_CTRL;
-      return true;
-    case ACAP_KEY_ALT_LEFT:
-    case ACAP_KEY_ALT_RIGHT:
-      *key = K_ALT;
-      return true;
-    case ACAP_KEY_ARROW_UP:
-      *key = K_UPARROW;
-      return true;
-    case ACAP_KEY_ARROW_DOWN:
-      *key = K_DOWNARROW;
-      return true;
-    case ACAP_KEY_ARROW_LEFT:
-      *key = K_LEFTARROW;
-      return true;
-    case ACAP_KEY_ARROW_RIGHT:
-      *key = K_RIGHTARROW;
-      return true;
-    default:
-      return false;
+  case ACAP_KEY_ESCAPE:
+    *key = K_ESCAPE;
+    return true;
+  case ACAP_KEY_TAB:
+    *key = K_TAB;
+    return true;
+  case ACAP_KEY_ENTER:
+    *key = K_ENTER;
+    return true;
+  case ACAP_KEY_SPACE:
+    *key = K_SPACE;
+    *special = false;
+    return true;
+  case ACAP_KEY_BACKSPACE:
+    *key = K_BACKSPACE;
+    return true;
+  case ACAP_KEY_SHIFT_LEFT:
+  case ACAP_KEY_SHIFT_RIGHT:
+    *key = K_SHIFT;
+    return true;
+  case ACAP_KEY_CTRL_LEFT:
+  case ACAP_KEY_CTRL_RIGHT:
+    *key = K_CTRL;
+    return true;
+  case ACAP_KEY_ALT_LEFT:
+  case ACAP_KEY_ALT_RIGHT:
+    *key = K_ALT;
+    return true;
+  case ACAP_KEY_ARROW_UP:
+    *key = K_UPARROW;
+    return true;
+  case ACAP_KEY_ARROW_DOWN:
+    *key = K_DOWNARROW;
+    return true;
+  case ACAP_KEY_ARROW_LEFT:
+    *key = K_LEFTARROW;
+    return true;
+  case ACAP_KEY_ARROW_RIGHT:
+    *key = K_RIGHTARROW;
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -74,23 +74,23 @@ static bool
 translate_button(uint8_t button, int *key)
 {
   switch (button) {
-    case ACAP_POINTER_BUTTON_LEFT:
-      *key = K_MOUSE1;
-      return true;
-    case ACAP_POINTER_BUTTON_MIDDLE:
-      *key = K_MOUSE3;
-      return true;
-    case ACAP_POINTER_BUTTON_RIGHT:
-      *key = K_MOUSE2;
-      return true;
-    case ACAP_POINTER_BUTTON_BACK:
-      *key = K_MOUSE4;
-      return true;
-    case ACAP_POINTER_BUTTON_FORWARD:
-      *key = K_MOUSE5;
-      return true;
-    default:
-      return false;
+  case ACAP_POINTER_BUTTON_LEFT:
+    *key = K_MOUSE1;
+    return true;
+  case ACAP_POINTER_BUTTON_MIDDLE:
+    *key = K_MOUSE3;
+    return true;
+  case ACAP_POINTER_BUTTON_RIGHT:
+    *key = K_MOUSE2;
+    return true;
+  case ACAP_POINTER_BUTTON_BACK:
+    *key = K_MOUSE4;
+    return true;
+  case ACAP_POINTER_BUTTON_FORWARD:
+    *key = K_MOUSE5;
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -112,8 +112,7 @@ release_pressed_input(void)
     acap_keys_down[code] = false;
   }
 
-  for (uint8_t button = ACAP_POINTER_BUTTON_LEFT; button <= ACAP_POINTER_BUTTON_FORWARD;
-       button++) {
+  for (uint8_t button = ACAP_POINTER_BUTTON_LEFT; button <= ACAP_POINTER_BUTTON_FORWARD; button++) {
     if (!acap_buttons_down[button]) {
       continue;
     }
@@ -135,51 +134,51 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 
   while (acap_input_next_event(&event)) {
     switch (event.type) {
-      case ACAP_INPUT_EVENT_KEY: {
-        int key;
-        bool special;
+    case ACAP_INPUT_EVENT_KEY: {
+      int key;
+      bool special;
 
-        if (translate_key(event.data.key.key, &key, &special)) {
-          Key_Event(key, event.data.key.down, special);
-          acap_keys_down[event.data.key.key] = event.data.key.down;
-        }
-        break;
+      if (translate_key(event.data.key.key, &key, &special)) {
+        Key_Event(key, event.data.key.down, special);
+        acap_keys_down[event.data.key.key] = event.data.key.down;
       }
+      break;
+    }
 
-      case ACAP_INPUT_EVENT_MOUSE:
-        if (mouse_active) {
-          *mouse_x += event.data.mouse.dx;
-          *mouse_y += event.data.mouse.dy;
-        }
-        break;
-
-      case ACAP_INPUT_EVENT_BUTTON: {
-        int key;
-
-        if (translate_button(event.data.button.button, &key)) {
-          Key_Event(key, event.data.button.down, true);
-          acap_buttons_down[event.data.button.button] = event.data.button.down;
-        }
-        break;
+    case ACAP_INPUT_EVENT_MOUSE:
+      if (mouse_active) {
+        *mouse_x += event.data.mouse.dx;
+        *mouse_y += event.data.mouse.dy;
       }
+      break;
 
-      case ACAP_INPUT_EVENT_WHEEL:
-        if (event.data.wheel.y != 0) {
-          int key = event.data.wheel.y > 0 ? K_MWHEELUP : K_MWHEELDOWN;
-          Key_Event(key, true, true);
-          Key_Event(key, false, true);
-        }
-        break;
+    case ACAP_INPUT_EVENT_BUTTON: {
+      int key;
 
-      case ACAP_INPUT_EVENT_RESET:
-        release_pressed_input();
-        Key_MarkAllUp();
-        *mouse_x = 0;
-        *mouse_y = 0;
-        break;
+      if (translate_button(event.data.button.button, &key)) {
+        Key_Event(key, event.data.button.down, true);
+        acap_buttons_down[event.data.button.button] = event.data.button.down;
+      }
+      break;
+    }
 
-      case ACAP_INPUT_EVENT_TEXT:
-        break;
+    case ACAP_INPUT_EVENT_WHEEL:
+      if (event.data.wheel.y != 0) {
+        int key = event.data.wheel.y > 0 ? K_MWHEELUP : K_MWHEELDOWN;
+        Key_Event(key, true, true);
+        Key_Event(key, false, true);
+      }
+      break;
+
+    case ACAP_INPUT_EVENT_RESET:
+      release_pressed_input();
+      Key_MarkAllUp();
+      *mouse_x = 0;
+      *mouse_y = 0;
+      break;
+
+    case ACAP_INPUT_EVENT_TEXT:
+      break;
     }
   }
 }

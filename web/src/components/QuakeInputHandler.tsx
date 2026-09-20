@@ -403,10 +403,7 @@ const QuakeInputHandler = ({
         'pointerlockchange',
         handlePointerLockChange
       );
-      document.removeEventListener(
-        'visibilitychange',
-        handleVisibilityChange
-      );
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
 
       if (capturedRef.current) {
         resetInput();
