@@ -89,6 +89,7 @@ cp "$ROOT/scripts/run-quake2.sh" "$STAGE_DIR/run-quake2.sh"
 chmod 0755 "$STAGE_DIR/run-quake2.sh"
 cp "$YQ2_DIR/release/ref_gles3.so" "$STAGE_DIR/ref_gles3.so"
 cp "$YQ2_DIR/release/baseq2/game.so" "$STAGE_DIR/baseq2/game.so"
+cp "$ROOT/config/autoexec.cfg" "$STAGE_DIR/baseq2/autoexec.cfg"
 cp -L "$SDL_PREFIX/lib/libSDL2-2.0.so.0" "$STAGE_DIR/lib/libSDL2-2.0.so.0"
 
 cp "$YQ2_DIR/LICENSE" "$STAGE_DIR/YAMAGI_LICENSE.txt"
@@ -124,6 +125,7 @@ EOF
     -a ref_gles3.so \
     -a run-quake2.sh \
     -a baseq2/game.so \
+    -a baseq2/autoexec.cfg \
     -a baseq2/pak0.pak \
     -a baseq2/pak1.pak \
     -a baseq2/pak2.pak \
