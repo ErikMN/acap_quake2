@@ -189,7 +189,8 @@ third_party/libwebsockets
 
 Generated build artifacts are kept under `build/` and are not committed.
 
-The EAP build also fetches pinned Quake II demo PAK files and verifies their expected Git blob IDs before packaging them. See `THIRD_PARTY_DATA.md` for the exact source information.
+The EAP build also fetches pinned Quake II demo PAK files and verifies their expected Git blob IDs before packaging them.
+See `THIRD_PARTY_DATA.md` for the exact source information.
 
 ## Target-side development
 
@@ -203,7 +204,6 @@ cd /usr/local/packages/acap_quake2
 ```
 
 When launched from a root shell, the helper switches to the ACAP package user and executes the same `acap_quake2` binary used by the service.
-
 
 ### Target helper commands
 

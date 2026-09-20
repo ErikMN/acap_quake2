@@ -1,8 +1,33 @@
 # ACAP Quake II
 
+<table border="2" cellpadding="10" cellspacing="0" width="100%">
+  <tr>
+    <td align="center">
+      <strong>⚠️ IMPORTANT ⚠️</strong><br/>
+      This application is <strong>not affiliated</strong> with id Software LLC or Axis Communications AB.<br/>
+      <strong>Please read and respect the LICENSE</strong> to ensure compliance.<br/>
+      <strong>UNOFFICIAL APP</strong><br/>
+      Requires "Allow unsigned apps" to be enabled on the device.
+    </td>
+  </tr>
+</table>
+
+<table border="2" cellpadding="10" cellspacing="0" width="100%">
+  <tr>
+    <td align="center">
+      <strong>⚠️ IMPORTANT ⚠️</strong><br/>
+      <strong>This application is not actively maintained.</strong><br/>
+      It may not work on all devices or firmware versions.<br/>
+      Requires AXIS OS firmware version <strong>11.11.220</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
+    </td>
+  </tr>
+</table>
+
 Yamagi Quake II running as an ACAP application on Axis devices.
 
-The project targets aarch64 Axis devices based on ARTPEC-8 and newer. Quake II is rendered with OpenGL ES 3 through axoverlay2 and appears directly in the Axis video stream.
+The project targets aarch64 Axis devices based on ARTPEC-8 and newer.
+
+Quake II is rendered with OpenGL ES 3 through axoverlay2 and appears directly in the Axis video stream.
 
 ## Status
 
