@@ -2,10 +2,11 @@ diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
 @@ -1324,6 +1324,6 @@
- $(BINDIR)/quake2 : $(CLIENT_OBJS)
+-$(BINDIR)/quake2 : $(CLIENT_OBJS)
++$(BINDIR)/quake2 : $(CLIENT_OBJS) $(ACAP_CLIENT_OBJS)
  	@echo "===> LD $@"
 -	${Q}$(CC) $(LDFLAGS) $(CLIENT_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
-+	${Q}$(CC) $(LDFLAGS) $(CLIENT_OBJS) $(LDLIBS) $(ACAP_CLIENT_LDLIBS) $(SDLLDFLAGS) -o $@
++	${Q}$(CC) $(LDFLAGS) $(CLIENT_OBJS) $(ACAP_CLIENT_OBJS) $(LDLIBS) $(ACAP_CLIENT_LDLIBS) $(SDLLDFLAGS) -o $@
  endif
  
  # q2ded
@@ -520,6 +521,42 @@ diff --git a/src/client/vid/glimp_sdl2.c b/src/client/vid/glimp_sdl2.c
  
  	Com_Printf("Drawable size: %ix%i\n", viddef.width, viddef.height);
  
+diff --git a/src/client/input/sdl2.c b/src/client/input/sdl2.c
+--- a/src/client/input/sdl2.c
++++ b/src/client/input/sdl2.c
+@@ -37,5 +37,9 @@
+ #include <SDL2/SDL.h>
+ 
++#ifdef YQ2_ACAP
++#include "input/acap_input.h"
++#endif
++
+ #include "header/input.h"
+ #include "header/gyro.h"
+ #include "../header/keyboard.h"
+@@ -2947,5 +2951,12 @@
+ 	SDL_StartTextInput();
+ 
+ 	IN_Controller_Init(false);
+ 
++#ifdef YQ2_ACAP
++	if (!acap_input_init())
++	{
++		Com_Error(ERR_FATAL, "Couldn't initialize ACAP input.\n");
++	}
++#endif
++
+ 	Com_Printf("------------------------------------\n\n");
+@@ -2994,5 +3005,9 @@
+ IN_Shutdown(void)
+ {
++#ifdef YQ2_ACAP
++	acap_input_shutdown();
++#endif
++
+ 	Cmd_RemoveCommand("force_centerview");
+ 	Cmd_RemoveCommand("+mlook");
+ 	Cmd_RemoveCommand("-mlook");
 diff --git a/src/backends/unix/main.c b/src/backends/unix/main.c
 --- a/src/backends/unix/main.c
 +++ b/src/backends/unix/main.c

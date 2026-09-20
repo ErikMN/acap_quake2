@@ -60,12 +60,21 @@ read -r -a ACAP_CFLAGS <<< "$(pkg-config --cflags $ACAP_PKGS)"
 "${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
   -c "$ROOT/src/overlay.c" -o "$ACAP_BUILD_DIR/overlay.o"
 
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC -pthread \
+  -I"$ROOT/src" -I"$LWS_PREFIX/include" \
+  -c "$ROOT/src/input/acap_input.c" -o "$ACAP_BUILD_DIR/acap_input.o"
+
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC -pthread \
+  -I"$ROOT/src" -I"$LWS_PREFIX/include" \
+  -c "$ROOT/src/input/websocket.c" -o "$ACAP_BUILD_DIR/websocket.o"
+
 ACAP_GLES3_OBJS="$ACAP_BUILD_DIR/gpu_context.o $ACAP_BUILD_DIR/overlay.o"
 ACAP_GLES3_LDLIBS="$(pkg-config --libs $ACAP_PKGS)"
+ACAP_CLIENT_OBJS="$ACAP_BUILD_DIR/acap_input.o $ACAP_BUILD_DIR/websocket.o"
 
 LWS_LDLIBS="$(PKG_CONFIG_PATH="$LWS_PREFIX/lib/pkgconfig" pkg-config --static --libs libwebsockets)"
 LWS_ARCHIVE="$LWS_PREFIX/lib/libwebsockets.a"
-ACAP_CLIENT_LDLIBS="${LWS_LDLIBS/-lwebsockets/$LWS_ARCHIVE}"
+ACAP_CLIENT_LDLIBS="${LWS_LDLIBS/-lwebsockets/$LWS_ARCHIVE} -pthread"
 
 echo "libwebsockets link flags: $ACAP_CLIENT_LDLIBS"
 
@@ -76,6 +85,7 @@ make \
   INCLUDE="-I$SDL_PREFIX/include -I$ROOT/src -DYQ2_ACAP" \
   ACAP_GLES3_OBJS="$ACAP_GLES3_OBJS" \
   ACAP_GLES3_LDLIBS="$ACAP_GLES3_LDLIBS" \
+  ACAP_CLIENT_OBJS="$ACAP_CLIENT_OBJS" \
   ACAP_CLIENT_LDLIBS="$ACAP_CLIENT_LDLIBS" \
   client \
   ref_gles3 \
