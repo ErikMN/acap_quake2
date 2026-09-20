@@ -10,6 +10,7 @@ STAGE_DIR="$ROOT/build/eap-stage"
 DEMO_REPO_DIR="$ROOT/build/quake2-demo"
 YQ2_DIR="$ROOT/third_party/yquake2"
 SDL_PREFIX="$ROOT/build/sdl2-install"
+WEB_BUILD_DIR="$ROOT/web/build"
 
 DEMO_REPO="https://github.com/drags/docker-quake2.git"
 DEMO_COMMIT="c8b00cbc4bce0c7bcad8d490af4cd1d45cb4cd7c"
@@ -72,8 +73,14 @@ for file in \
   fi
 done
 
+if [ ! -e "$WEB_BUILD_DIR/index.html" ]; then
+  echo "Missing web build: $WEB_BUILD_DIR/index.html"
+  echo "Run make web first."
+  exit 1
+fi
+
 rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR/baseq2" "$STAGE_DIR/lib"
+mkdir -p "$STAGE_DIR/baseq2" "$STAGE_DIR/lib" "$STAGE_DIR/html"
 
 cp "$YQ2_DIR/release/quake2" "$STAGE_DIR/acap_quake2"
 cp "$ROOT/manifest.json" "$STAGE_DIR/manifest.json"
@@ -88,6 +95,7 @@ cp "$YQ2_DIR/LICENSE" "$STAGE_DIR/YAMAGI_LICENSE.txt"
 cp "$ROOT/third_party/SDL2/LICENSE.txt" "$STAGE_DIR/SDL2_LICENSE.txt"
 cp "$ROOT/third_party/libwebsockets/LICENSE" "$STAGE_DIR/LIBWEBSOCKETS_LICENSE.txt"
 cp "$ROOT/THIRD_PARTY_DATA.md" "$STAGE_DIR/THIRD_PARTY_DATA.md"
+cp -R "$WEB_BUILD_DIR"/. "$STAGE_DIR/html/"
 
 echo "Fetching pinned Quake II demo data"
 fetch_commit "$DEMO_REPO_DIR" "$DEMO_REPO" "$DEMO_COMMIT"

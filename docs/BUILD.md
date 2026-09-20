@@ -10,6 +10,9 @@ The host system needs:
 - GNU Make
 - Docker
 
+Node.js and Yarn are only required on the host when running the web development
+server. The ACAP build image contains its own Node.js and Yarn installation.
+
 The ACAP toolchain and target libraries are provided by the Docker image built from `oci/Dockerfile`.
 
 ## Complete build
@@ -36,6 +39,9 @@ libwebsockets
     |
     v
 Yamagi Quake II
+    |
+    v
+Web UI
     |
     v
 EAP packaging
@@ -77,9 +83,32 @@ This normally only needs to be rerun when `oci/Dockerfile` or the SDK configurat
 make eap
 ```
 
-Builds the application and packages the EAP using an already-built SDK image.
+Builds the application, builds the web UI, and packages the EAP using an
+already-built SDK image.
 
 During normal development this is usually the fastest complete build command.
+
+### Web UI
+
+Build the production web assets in the ACAP build container:
+
+```sh
+make web
+```
+
+The output is written to `web/build` and is copied into the EAP as the
+application setting page.
+
+For frontend development, install Node.js and Yarn on the host, configure the
+target device, and start the Vite development server:
+
+```sh
+source ./setuptarget.sh
+make webdev
+```
+
+The development server listens on port 8080 and proxies the Axis video,
+package-manager, and ACAP input endpoints to the configured target device.
 
 ### SDL2
 

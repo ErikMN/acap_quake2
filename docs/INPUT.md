@@ -25,3 +25,9 @@ Mouse button identifiers follow the browser button layout used by the frontend:
 - 4: forward
 
 WebSocket callbacks only validate and enqueue input. Yamagi drains the queue from `IN_Update()`. A reset event is generated on connect, disconnect, explicit reset, and queue overflow so held keys cannot remain stuck when input state is lost.
+
+The browser implementation lives in `web/src/input.ts`. It uses
+`KeyboardEvent.code` so key identifiers represent physical controls rather
+than keyboard-layout-dependent characters. Pointer lock is used for relative
+mouse motion. Losing pointer lock, browser focus, or the WebSocket connection
+resets held input state.

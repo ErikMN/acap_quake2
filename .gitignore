@@ -17,3 +17,6 @@ release/
 baseq2/
 .bash_history
 credentials*.json
+
+.yarnrc
+html

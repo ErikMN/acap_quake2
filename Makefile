@@ -46,8 +46,16 @@ image:
 .PHONY: build
 build: yquake2-client
 
+.PHONY: web
+web:
+	$(CONTAINER_CMD) bash -lc 'cd web && yarn install --frozen-lockfile --cache-folder ../build/yarn-cache && yarn build'
+
+.PHONY: webdev
+webdev:
+	cd web && yarn install --frozen-lockfile && yarn start
+
 .PHONY: eap
-eap: yquake2-client
+eap: yquake2-client web
 	$(CONTAINER_CMD) ./oci/build_eap.sh $(FINAL)
 
 .PHONY: shell
@@ -80,3 +88,4 @@ indent:
 clean:
 	$(RM) *.eap *_LICENSE.txt
 	$(RM) package.conf package.conf.orig param.conf
+	$(RM) -r web/build

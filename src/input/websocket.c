@@ -45,8 +45,6 @@ websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user
       break;
 
     case LWS_CALLBACK_RECEIVE:
-      syslog(LOG_INFO, "ACAP input: WebSocket received %zu bytes", len);
-
       if (!lws_frame_is_binary(wsi)) {
         syslog(LOG_WARNING, "ACAP input: ignoring non-binary WebSocket message");
         break;

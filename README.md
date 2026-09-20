@@ -16,8 +16,11 @@ The game currently runs on Axis hardware with:
 - statically linked libwebsockets
 - pinned Quake II demo data fetched during the build
 - direct ACAP start and stop support
+- packaged React web interface with live video and browser controls
+- authenticated WebSocket keyboard and mouse input
 
-Keyboard and mouse input through the browser is the next development step.
+The web interface can start and stop the application, display the Axis video
+stream, and capture keyboard and pointer-lock mouse input for Quake II.
 
 ## Build
 
