@@ -14,6 +14,8 @@ struct websocket_server_state {
   pthread_mutex_t mutex;
   pthread_cond_t condition;
   struct lws_context *context;
+  struct acap_websocket_callbacks callbacks;
+  void *callback_user;
   bool thread_created;
   bool startup_complete;
   bool running;
@@ -36,6 +38,10 @@ websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user
   switch (reason) {
     case LWS_CALLBACK_ESTABLISHED:
       syslog(LOG_INFO, "ACAP input: WebSocket client connected");
+
+      if (server.callbacks.connected) {
+        server.callbacks.connected(server.callback_user);
+      }
       break;
 
     case LWS_CALLBACK_RECEIVE:
@@ -44,6 +50,10 @@ websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user
 
     case LWS_CALLBACK_CLOSED:
       syslog(LOG_INFO, "ACAP input: WebSocket client disconnected");
+
+      if (server.callbacks.disconnected) {
+        server.callbacks.disconnected(server.callback_user);
+      }
       break;
 
     default:
@@ -130,7 +140,7 @@ websocket_thread(void *arg)
 }
 
 bool
-acap_websocket_start(void)
+acap_websocket_start(const struct acap_websocket_callbacks *callbacks, void *user)
 {
   bool running;
   int result;
@@ -144,6 +154,8 @@ acap_websocket_start(void)
   }
 
   server.context = NULL;
+  server.callbacks = callbacks ? *callbacks : (struct acap_websocket_callbacks){0};
+  server.callback_user = user;
   server.startup_complete = false;
   server.running = false;
   server.stop_requested = false;
@@ -208,6 +220,8 @@ acap_websocket_stop(void)
 
   pthread_mutex_lock(&server.mutex);
   server.context = NULL;
+  server.callbacks = (struct acap_websocket_callbacks){0};
+  server.callback_user = NULL;
   server.thread_created = false;
   server.startup_complete = false;
   server.running = false;
