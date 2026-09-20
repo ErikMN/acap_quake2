@@ -92,7 +92,7 @@ diff --git a/src/client/refresh/gl3/gl3_main.c b/src/client/refresh/gl3/gl3_main
  	GL3_SetGL2D();
  
  	int x = (vid.width - r_newrefdef.width)/2;
-@@ -2100,9 +2100,15 @@
+@@ -2100,9 +2100,24 @@
  	}
  }
  
@@ -106,6 +106,15 @@ diff --git a/src/client/refresh/gl3/gl3_main.c b/src/client/refresh/gl3/gl3_main
 +	if (!GL3_BeginOutputFrame())
 +	{
 +		Com_Error(ERR_FATAL, "Failed to acquire ACAP overlay frame");
++	}
++
++	int width, height;
++	GL3_GetDrawableSize(&width, &height);
++
++	if (width > 0 && height > 0 && (vid.width != width || vid.height != height))
++	{
++		vid.width = width;
++		vid.height = height;
 +	}
 +#endif
  #if 0 // TODO: stereo stuff
@@ -316,7 +325,7 @@ diff --git a/src/client/refresh/gl3/gl3_sdl.c b/src/client/refresh/gl3/gl3_sdl.c
  	{
  		Com_Printf("GL3_InitContext(): ERROR: loading OpenGL function pointers failed!\n");
  
-@@ -452,39 +522,85 @@
+@@ -452,39 +522,86 @@
  /*
   * Fills the actual size of the drawable into width and height.
   */
@@ -363,7 +372,8 @@ diff --git a/src/client/refresh/gl3/gl3_sdl.c b/src/client/refresh/gl3/gl3_sdl.c
 +	}
 +	else
 +	{
-+		SDL_GetWindowSize(window, width, height);
++		*width = vid.width;
++		*height = vid.height;
 +	}
 +#elif defined(USE_SDL3)
 +	SDL_GetWindowSizeInPixels(window, width, height);
@@ -521,6 +531,30 @@ diff --git a/src/client/vid/glimp_sdl2.c b/src/client/vid/glimp_sdl2.c
  
  	Com_Printf("Drawable size: %ix%i\n", viddef.width, viddef.height);
  
+diff --git a/src/client/vid/vid.c b/src/client/vid/vid.c
+--- a/src/client/vid/vid.c
++++ b/src/client/vid/vid.c
+@@ -504,6 +504,20 @@
+ void
+ VID_CheckChanges(void)
+ {
++#ifdef YQ2_ACAP
++	if (ref_active)
++	{
++		int width, height;
++		re.GetDrawableSize(&width, &height);
++
++		if (width > 0 && height > 0 && (viddef.width != width || viddef.height != height))
++		{
++			viddef.width = width;
++			viddef.height = height;
++		}
++	}
++#endif
++
+ 	// Hack around renderers that still abuse vid_fullscreen
+ 	// to communicate restart requests to the client.
+ 	ref_restart_t rs;
 diff --git a/src/client/input/sdl2.c b/src/client/input/sdl2.c
 --- a/src/client/input/sdl2.c
 +++ b/src/client/input/sdl2.c
