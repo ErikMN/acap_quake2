@@ -4,6 +4,9 @@
 
 #include "client/header/keyboard.h"
 
+static bool acap_keys_down[ACAP_KEY_COUNT];
+static bool acap_buttons_down[ACAP_POINTER_BUTTON_FORWARD + 1];
+
 static bool
 translate_key(enum acap_key_code code, int *key, bool *special)
 {
@@ -91,6 +94,40 @@ translate_button(uint8_t button, int *key)
   }
 }
 
+static void
+release_pressed_input(void)
+{
+  for (enum acap_key_code code = ACAP_KEY_UNKNOWN + 1; code < ACAP_KEY_COUNT; code++) {
+    if (!acap_keys_down[code]) {
+      continue;
+    }
+
+    int key;
+    bool special;
+
+    if (translate_key(code, &key, &special)) {
+      Key_Event(key, false, special);
+    }
+
+    acap_keys_down[code] = false;
+  }
+
+  for (uint8_t button = ACAP_POINTER_BUTTON_LEFT; button <= ACAP_POINTER_BUTTON_FORWARD;
+       button++) {
+    if (!acap_buttons_down[button]) {
+      continue;
+    }
+
+    int key;
+
+    if (translate_button(button, &key)) {
+      Key_Event(key, false, true);
+    }
+
+    acap_buttons_down[button] = false;
+  }
+}
+
 void
 acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 {
@@ -104,6 +141,7 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 
         if (translate_key(event.data.key.key, &key, &special)) {
           Key_Event(key, event.data.key.down, special);
+          acap_keys_down[event.data.key.key] = event.data.key.down;
         }
         break;
       }
@@ -120,6 +158,7 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 
         if (translate_button(event.data.button.button, &key)) {
           Key_Event(key, event.data.button.down, true);
+          acap_buttons_down[event.data.button.button] = event.data.button.down;
         }
         break;
       }
@@ -133,6 +172,7 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
         break;
 
       case ACAP_INPUT_EVENT_RESET:
+        release_pressed_input();
         Key_MarkAllUp();
         *mouse_x = 0;
         *mouse_y = 0;
