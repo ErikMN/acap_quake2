@@ -12,7 +12,7 @@ const serverFetch = async (url, init = {}) => {
   return response;
 };
 
-const serverPost = (url, body) => {
+export const serverPost = (url, body) => {
   return serverFetch(url, { method: 'POST', body });
 };
 

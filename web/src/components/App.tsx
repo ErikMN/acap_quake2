@@ -9,7 +9,7 @@ import { useLocalStorage, useScreenSizes } from '../helpers/hooks.jsx';
 import { drawerWidth, drawerHeight, appbarHeight } from './constants';
 import { enableLogging } from '../helpers/logger';
 import { useGlobalContext } from './context/GlobalContext.js';
-import { jsonRequest } from '../helpers/cgihelper';
+import { serverPost } from '../helpers/cgihelper';
 import { getBackendWebSocketUrl } from './getBackendWebSocketUrl';
 import AboutModal from './AboutModal';
 import AlertSnackbar from './AlertSnackbar';
@@ -232,7 +232,7 @@ const App: React.FC = () => {
 
   /****************************************************************************/
   /* GAME */
-  const P_CGI = '/axis-cgi/packagemanager.cgi';
+  const CONTROL_CGI = '/axis-cgi/applications/control.cgi';
   const TIMEOUT = 2000;
 
   /* FIXME: Game state */
@@ -341,24 +341,24 @@ const App: React.FC = () => {
       setLoadingMessage(
         key === 'start' ? 'Starting Quake II ...' : 'Stopping Quake II ...'
       );
-      const appReq = {
-        apiVersion: '1.4',
-        method: key,
-        params: {
-          id: 'acap_quake2',
-          generation: 2
-        }
-      };
+      const query = new URLSearchParams({
+        action: key,
+        package: 'acap_quake2'
+      });
 
+      setErrorResp('');
       try {
-        const resp = await jsonRequest(P_CGI, appReq);
-        if ('error' in resp) {
-          console.error(resp.error);
-          setErrorResp(resp.error);
-          setLoading(false);
+        const resp = await serverPost(`${CONTROL_CGI}?${query.toString()}`);
+        const responseText = (await resp.text()).trim();
+        if (!resp.ok || responseText !== 'OK') {
+          const errorMessage =
+            responseText ||
+            resp.statusText ||
+            'Application control request failed';
+          console.error(errorMessage);
+          setErrorResp(errorMessage);
           return;
         }
-        setLoading(false);
         if (key === 'start') {
           setRunning(true);
         } else {
@@ -366,11 +366,13 @@ const App: React.FC = () => {
           setControlsConnected(false);
         }
       } catch (error) {
-        setErrorResp(error as string);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        setErrorResp(errorMessage);
         console.error('Request failed:', error);
+      } finally {
+        setLoading(false);
       }
-      setErrorResp('');
-      setLoading(false);
     };
 
     setData();
