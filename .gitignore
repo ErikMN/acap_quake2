@@ -3,6 +3,8 @@ acap_quake2
 *.o
 *.eap
 *_LICENSE.txt
+*log_messages.txt
+*var_log_messages.old
 
 package.conf
 package.conf*
@@ -12,6 +14,7 @@ tmp*
 debug/
 build/
 release/
+third_party/
 
 *.pak
 baseq2/
@@ -20,3 +23,5 @@ credentials*.json
 
 .yarnrc
 html
+.history
+.eap-install.cfg
