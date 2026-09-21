@@ -779,22 +779,26 @@ const App: React.FC = () => {
             <Box
               sx={{
                 position: 'absolute',
-                top: 8,
-                left: 8,
+                top: pointerCaptured ? 8 : '50%',
+                left: '50%',
+                transform: pointerCaptured
+                  ? 'translateX(-50%)'
+                  : 'translate(-50%, -50%)',
                 zIndex: 20,
                 maxWidth: 'calc(100% - 16px)',
-                px: 1,
-                py: 0.5,
+                px: 2,
+                py: 1,
                 borderRadius: 1,
                 bgcolor: 'rgba(0, 0, 0, 0.7)',
                 color: 'white',
-                fontSize: '12px',
+                fontSize: '14px',
+                textAlign: 'center',
                 pointerEvents: 'none'
               }}
             >
               {pointerCaptured
-                ? 'Mouse captured. Press Esc to release mouse. Press Esc again for the Quake II menu.'
-                : 'Click the video to capture keyboard and mouse.'}
+                ? 'Input captured. Press Esc once to release the mouse, then press Esc again to open the Quake II menu.'
+                : 'Click anywhere in the game to capture mouse and keyboard input.'}
             </Box>
           </Box>
         </Main>
