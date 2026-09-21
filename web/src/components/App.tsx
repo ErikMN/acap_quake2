@@ -21,6 +21,8 @@ import LogBox from './LogBox';
 import InfoBox from './InfoBox';
 
 import BugReportOutlinedIcon from '@mui/icons-material/BugReportOutlined';
+import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
+import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SaveIcon from '@mui/icons-material/Save';
 import StopIcon from '@mui/icons-material/Stop';
@@ -306,31 +308,52 @@ const App: React.FC = () => {
   /* WebSocket status indicator */
   const WsStatus = () => {
     return (
-      <div
-        style={{
+      <Box
+        sx={{
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
-          alignItems: 'center'
+          alignItems: 'center',
+          gap: 1,
+          my: 1
         }}
       >
-        {!controlsConnected ? (
-          <div>
-            <p>
-              <span style={{ color: 'red', fontSize: '24px' }}>&#9679;</span>{' '}
-              Controls Disconnected
-            </p>
-            {appSettings.debug === true && connectionError && (
-              <p style={{ color: 'lightgrey' }}>{connectionError}</p>
-            )}
-          </div>
-        ) : (
-          <p>
-            <span style={{ color: '#65e765', fontSize: '24px' }}>&#9679;</span>{' '}
-            Controls Connected
-          </p>
-        )}
-      </div>
+        <Chip
+          icon={
+            controlsConnected ? (
+              <CheckCircleOutlinedIcon />
+            ) : (
+              <ErrorOutlinedIcon />
+            )
+          }
+          label={
+            controlsConnected ? 'Controls connected' : 'Controls disconnected'
+          }
+          color={controlsConnected ? 'success' : 'error'}
+          variant="outlined"
+          sx={{
+            fontWeight: 600,
+            '& .MuiChip-icon': {
+              color: 'inherit'
+            }
+          }}
+        />
+        {!controlsConnected &&
+          appSettings.debug === true &&
+          connectionError && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{
+                maxWidth: '100%',
+                textAlign: 'center',
+                overflowWrap: 'anywhere'
+              }}
+            >
+              {connectionError}
+            </Typography>
+          )}
+      </Box>
     );
   };
 
