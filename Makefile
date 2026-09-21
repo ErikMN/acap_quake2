@@ -3,6 +3,7 @@ ARCH := aarch64
 
 CONTAINER_RUNTIME ?= docker
 DOCKER_TAG := acap_quake2_$(ARCH)
+CONTAINER_TTY_ARG := $(shell if test -t 0; then printf '%s' -t; fi)
 
 ROOT := $(CURDIR)
 
@@ -14,11 +15,11 @@ CONTAINER_ARGS := --rm \
 	-v /etc/passwd:/etc/passwd:ro \
 	-v /etc/group:/etc/group:ro
 
-CONTAINER_CMD := $(CONTAINER_RUNTIME) run -i \
+CONTAINER_CMD := $(CONTAINER_RUNTIME) run -i $(CONTAINER_TTY_ARG) \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
-CONTAINER_TARGET_CMD := $(CONTAINER_RUNTIME) run -i \
+CONTAINER_TARGET_CMD := $(CONTAINER_RUNTIME) run -i $(CONTAINER_TTY_ARG) \
 	$(CONTAINER_ARGS) \
 	-e TARGET_IP=$(TARGET_IP) \
 	-e TARGET_USR=$(TARGET_USR) \
