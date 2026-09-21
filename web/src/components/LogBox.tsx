@@ -61,6 +61,20 @@ const LogBox: React.FC = () => {
         label="Logs"
         value={serverLog}
         textFieldRef={textFieldRef}
+        inputProps={{ spellCheck: false, wrap: 'off' }}
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            backgroundColor:
+              theme.palette.mode === 'dark' ? '#151719' : '#f6f8fa'
+          },
+          '& .MuiInputBase-input': {
+            fontFamily:
+              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            fontSize: '13px',
+            lineHeight: 1.6,
+            tabSize: 4
+          }
+        }}
       />
       <div style={{ marginTop: '1em' }} />
       {/* App log controls */}
