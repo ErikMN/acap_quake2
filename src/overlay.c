@@ -1,3 +1,8 @@
+/*
+ * Connects Quake's finished frames to the Axis video stream.
+ * It gets camera images, fills them on the GPU, and returns them for display.
+ */
+
 #include "overlay.h"
 
 #include "gpu_context.h"
@@ -17,6 +22,11 @@
 #include <vdo-error.h>
 #include <vdo-stream.h>
 
+/*
+ * The camera cycles through several image buffers. The first time we see one,
+ * we prepare it for GPU drawing and keep that setup around. When the same
+ * buffer comes back later we can reuse it instead of setting it up again.
+ */
 struct render_surface {
   unsigned long buffer_id;
   EGLDisplay display;
@@ -146,6 +156,11 @@ overlay_context_get_event_fd(const struct overlay_context *overlay)
 bool
 overlay_context_process_events(struct overlay_context *overlay)
 {
+  /*
+   * Video streams can appear and disappear while the application is running.
+   * Follow those changes so Quake always draws into the stream that currently
+   * exists, and clean up when that stream goes away.
+   */
   VdoStream *event_stream = overlay->event_stream;
 
   for (;;) {
@@ -223,6 +238,11 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
     return true;
   }
 
+  /*
+   * Ask the camera for the next image that is free to use. The camera owns
+   * these images and rotates between them, so the one we receive can change
+   * from frame to frame.
+   */
   axo_err *error = NULL;
   axo_buffer *buffer = axo_get_buffer(overlay->overlay_id, NULL, &error);
 
@@ -257,6 +277,10 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
   overlay->current_buffer = buffer;
   overlay->current_surface = surface;
 
+  /*
+   * Quake draws into one stable image of our own. This keeps the game renderer
+   * simple even though the camera gives us a different output image over time.
+   */
   glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
   glViewport(0, 0, (GLsizei)overlay->width, (GLsizei)overlay->height);
 
@@ -285,6 +309,12 @@ overlay_context_end_frame(struct overlay_context *overlay)
 
   axo_err *error = NULL;
 
+  /*
+   * The game frame is already on the GPU. Copy it straight into the camera's
+   * image without bringing the pixels back through the CPU. The destination Y
+   * coordinates are reversed because the game and video image count vertical
+   * positions from opposite sides.
+   */
   glBindFramebuffer(GL_READ_FRAMEBUFFER, overlay->render_framebuffer);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, surface->framebuffer);
 
@@ -299,6 +329,11 @@ overlay_context_end_frame(struct overlay_context *overlay)
                     GL_COLOR_BUFFER_BIT,
                     GL_NEAREST);
 
+  /*
+   * Wait until the GPU has finished writing the image before giving it back to
+   * the camera. Otherwise the video stream could start using an unfinished
+   * frame.
+   */
   glFinish();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -350,6 +385,11 @@ overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_c
 static bool
 create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned stream_width, unsigned stream_height)
 {
+  /*
+   * When the stream size can be divided cleanly in half, render the game at
+   * half width and height and let the camera scale it back up. This greatly
+   * reduces the amount of drawing Quake has to do for each frame.
+   */
   bool use_upscale = stream_width % 2 == 0 && stream_height % 2 == 0;
   unsigned used_width = use_upscale ? stream_width / 2 : stream_width;
   unsigned used_height = use_upscale ? stream_height / 2 : stream_height;
@@ -434,6 +474,10 @@ create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned str
 static bool
 create_render_target(struct overlay_context *overlay)
 {
+  /*
+   * Keep one private game image at a fixed size. Quake renders here first, then
+   * the finished image is copied into whichever camera buffer is available.
+   */
   glGenTextures(1, &overlay->render_texture);
   glBindTexture(GL_TEXTURE_2D, overlay->render_texture);
 
@@ -523,6 +567,10 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
     return NULL;
   }
 
+  /*
+   * Make the camera-owned image available to the GPU directly. This is the key
+   * part that avoids copying a full frame through normal CPU memory.
+   */
   int dma_buf_fd = axo_buffer_get_dma_buf_fd(buffer);
 
   if (dma_buf_fd < 0) {

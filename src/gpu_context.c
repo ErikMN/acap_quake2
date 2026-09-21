@@ -1,3 +1,8 @@
+/*
+ * Sets up the graphics connection Quake uses on the camera.
+ * This lets the game use the GPU even though there is no desktop window.
+ */
+
 #include "gpu_context.h"
 
 #include <stddef.h>
@@ -8,6 +13,11 @@
 bool
 gpu_context_init(struct gpu_context *gpu)
 {
+  /*
+   * Quake normally draws into a real window. There is no desktop window on the
+   * camera, but the graphics driver still needs a small surface while the game
+   * is running. The finished game image is sent to the video stream separately.
+   */
   static const EGLint config_attributes[] = {
     EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE,
   };
@@ -63,6 +73,10 @@ gpu_context_init(struct gpu_context *gpu)
     goto fail;
   }
 
+  /*
+   * Make this graphics setup active on the game thread. All later Quake drawing
+   * uses this same setup until the application shuts down.
+   */
   if (!eglMakeCurrent(gpu->display, gpu->surface, gpu->surface, gpu->context)) {
     syslog(LOG_ERR, "Failed to make EGL context current");
     goto fail;

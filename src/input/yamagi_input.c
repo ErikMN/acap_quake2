@@ -1,9 +1,18 @@
+/*
+ * Turns queued browser controls into input that Yamagi Quake II understands.
+ * This is where keys, mouse movement, buttons, and the wheel enter the game.
+ */
+
 #include "yamagi_input.h"
 
 #include "acap_input.h"
 
 #include "client/header/keyboard.h"
 
+/*
+ * Remember what the browser currently holds down. This lets us release every
+ * active key and mouse button if focus is lost or the connection disappears.
+ */
 static bool acap_keys_down[ACAP_KEY_COUNT];
 static bool acap_buttons_down[ACAP_POINTER_BUTTON_FORWARD + 1];
 
@@ -130,6 +139,11 @@ release_pressed_input(void)
 void
 acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 {
+  /*
+   * This runs from Quake's normal input update. The WebSocket thread has only
+   * queued messages up to this point. Turning them into real game input here
+   * keeps all changes to Quake on the game thread where they belong.
+   */
   struct acap_input_event event;
 
   while (acap_input_next_event(&event)) {
@@ -146,6 +160,10 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
     }
 
     case ACAP_INPUT_EVENT_MOUSE:
+      /*
+       * Mouse messages contain movement since the previous browser event. Add
+       * each piece together so Quake sees the complete movement for this frame.
+       */
       if (mouse_active) {
         *mouse_x += event.data.mouse.dx;
         *mouse_y += event.data.mouse.dy;
@@ -171,6 +189,10 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
       break;
 
     case ACAP_INPUT_EVENT_RESET:
+      /*
+       * A reset means we can no longer trust which controls are still held.
+       * Release everything and discard any old mouse movement before continuing.
+       */
       release_pressed_input();
       Key_MarkAllUp();
       *mouse_x = 0;

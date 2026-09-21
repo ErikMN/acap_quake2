@@ -1,3 +1,8 @@
+/*
+ * Receives browser controls through a local WebSocket connection.
+ * It passes the incoming messages on without changing Quake directly.
+ */
+
 #include "websocket.h"
 
 #include <pthread.h>
@@ -30,6 +35,11 @@ static struct websocket_server_state server = {
 static int
 websocket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len)
 {
+  /*
+   * This function runs on the WebSocket thread, not on Quake's game thread.
+   * Keep it small and only pass input onward. The game reads the input later
+   * from its own thread, which avoids changing game state from two places.
+   */
   (void)wsi;
   (void)user;
   (void)in;
@@ -91,6 +101,10 @@ websocket_thread(void *arg)
 
   (void)arg;
 
+  /*
+   * Listen only inside the device. The Axis web server is the public entry
+   * point and forwards authenticated browser input to this local connection.
+   */
   memset(&info, 0, sizeof(info));
   info.port = ACAP_WEBSOCKET_PORT;
   info.iface = "lo";
@@ -168,6 +182,10 @@ acap_websocket_start(const struct acap_websocket_callbacks *callbacks, void *use
   server.running = false;
   server.stop_requested = false;
 
+  /*
+   * Network handling has its own thread so waiting for browser messages never
+   * stalls the game loop or the rendering of a frame.
+   */
   result = pthread_create(&server.thread, NULL, websocket_thread, NULL);
 
   if (result != 0) {

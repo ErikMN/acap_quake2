@@ -1,3 +1,8 @@
+/*
+ * Connects incoming browser messages to the game's input queue.
+ * It checks each message and resets held controls when the connection changes.
+ */
+
 #include "acap_input.h"
 
 #include "input_protocol.h"
@@ -14,6 +19,11 @@ enqueue_event(struct acap_input_queue *queue, const struct acap_input_event *eve
     return;
   }
 
+  /*
+   * If input arrives faster than the game can consume it, old key presses are
+   * no longer trustworthy. Clear them and ask the game to release everything
+   * instead of risking a movement key staying held forever.
+   */
   const struct acap_input_event reset = {
     .type = ACAP_INPUT_EVENT_RESET,
   };
@@ -51,6 +61,10 @@ receive_message(const uint8_t *data, size_t len, void *user)
 bool
 acap_input_init(void)
 {
+  /*
+   * Start every browser connection from a known state. We also reset when the
+   * browser disconnects because a released key may otherwise never reach us.
+   */
   const struct acap_websocket_callbacks callbacks = {
     .connected = enqueue_reset,
     .disconnected = enqueue_reset,

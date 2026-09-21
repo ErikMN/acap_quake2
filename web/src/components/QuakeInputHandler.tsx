@@ -1,3 +1,8 @@
+/*
+ * Captures keyboard and mouse controls in the browser.
+ * It sends small input messages to the ACAP while the game has focus.
+ */
+
 import { RefObject, useEffect, useRef } from 'react';
 
 interface QuakeInputHandlerProps {
@@ -166,12 +171,22 @@ const QuakeInputHandler = ({
       socket.send(packet);
     };
 
+    /*
+     * The browser can lose focus without sending normal key-up events. Tell the
+     * game to release everything whenever that happens so controls cannot get
+     * stuck after switching tabs or leaving mouse capture.
+     */
     const resetInput = () => {
       send(new Uint8Array([PROTOCOL_VERSION, MessageType.Reset]).buffer);
       pressedKeysRef.current.clear();
       pressedButtonsRef.current.clear();
     };
 
+    /*
+     * Send small fixed-size messages instead of text. The first bytes say what
+     * kind of input this is, and the remaining bytes contain only the values
+     * needed for that event.
+     */
     const sendKey = (key: AcapKey, down: boolean) => {
       const packet = new ArrayBuffer(5);
       const view = new DataView(packet);
@@ -294,6 +309,11 @@ const QuakeInputHandler = ({
       sendKey(key, false);
     };
 
+    /*
+     * Mouse capture gives movement rather than a screen position. That lets the
+     * player keep turning in either direction without the pointer reaching the
+     * edge of the browser window.
+     */
     const handleMouseMove = (event: MouseEvent) => {
       if (document.pointerLockElement !== target) {
         return;

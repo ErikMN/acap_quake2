@@ -1,3 +1,8 @@
+/*
+ * Stores browser input until the game thread is ready to handle it.
+ * The queue keeps events in order and protects them while two threads use it.
+ */
+
 #include "input_queue.h"
 
 #include <string.h>
@@ -31,6 +36,11 @@ acap_input_queue_destroy(struct acap_input_queue *queue)
 bool
 acap_input_queue_push(struct acap_input_queue *queue, const struct acap_input_event *event)
 {
+  /*
+   * Browser input arrives on one thread while Quake reads it on another. The
+   * lock makes each change to the queue happen as one complete operation, so
+   * the game never sees an event while it is only partly written.
+   */
   bool pushed = false;
 
   pthread_mutex_lock(&queue->mutex);
@@ -50,6 +60,11 @@ acap_input_queue_push(struct acap_input_queue *queue, const struct acap_input_ev
 bool
 acap_input_queue_pop(struct acap_input_queue *queue, struct acap_input_event *event)
 {
+  /*
+   * Events leave the queue in the same order they arrived. This matters for
+   * pairs such as key down followed by key up, where reversing them could leave
+   * a control stuck in the wrong state.
+   */
   bool popped = false;
 
   pthread_mutex_lock(&queue->mutex);
