@@ -236,6 +236,7 @@ const App: React.FC = () => {
   /* GAME */
   const CONTROL_CGI = '/axis-cgi/applications/control.cgi';
   const TIMEOUT = 2000;
+  const INPUT_CAPTURE_MESSAGE_TIMEOUT = 4000;
 
   /* FIXME: Game state */
   const [isLoading, setLoading] = useState<boolean>(false);
@@ -245,12 +246,26 @@ const App: React.FC = () => {
   const [connectionError, setConnectionError] = useState<string>('');
   const [controlsConnected, setControlsConnected] = useState<boolean>(false);
   const [pointerCaptured, setPointerCaptured] = useState<boolean>(false);
+  const [showCapturedMessage, setShowCapturedMessage] = useState<boolean>(true);
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
 
   /* Websocket endpoint */
   const wsAddress = getBackendWebSocketUrl();
+
+  useEffect(() => {
+    if (!pointerCaptured) {
+      setShowCapturedMessage(true);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowCapturedMessage(false);
+    }, INPUT_CAPTURE_MESSAGE_TIMEOUT);
+
+    return () => window.clearTimeout(timer);
+  }, [pointerCaptured]);
 
   /* Websocket setup */
   useEffect(() => {
@@ -799,30 +814,36 @@ const App: React.FC = () => {
             }}
           >
             <VideoPlayer />
-            <Box
-              sx={{
-                position: 'absolute',
-                top: pointerCaptured ? 8 : '50%',
-                left: '50%',
-                transform: pointerCaptured
-                  ? 'translateX(-50%)'
-                  : 'translate(-50%, -50%)',
-                zIndex: 20,
-                maxWidth: 'calc(100% - 16px)',
-                px: 2,
-                py: 1,
-                borderRadius: 1,
-                bgcolor: 'rgba(0, 0, 0, 0.7)',
-                color: 'white',
-                fontSize: '14px',
-                textAlign: 'center',
-                pointerEvents: 'none'
-              }}
+            <Fade
+              in={!pointerCaptured || showCapturedMessage}
+              timeout={500}
+              unmountOnExit
             >
-              {pointerCaptured
-                ? 'Input captured. Press Esc once to release the mouse, then press Esc again to open the Quake II menu.'
-                : 'Click anywhere in the game to capture mouse and keyboard input.'}
-            </Box>
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: pointerCaptured ? 8 : '50%',
+                  left: '50%',
+                  transform: pointerCaptured
+                    ? 'translateX(-50%)'
+                    : 'translate(-50%, -50%)',
+                  zIndex: 20,
+                  maxWidth: 'calc(100% - 16px)',
+                  px: 2,
+                  py: 1,
+                  borderRadius: 1,
+                  bgcolor: 'rgba(0, 0, 0, 0.7)',
+                  color: 'white',
+                  fontSize: '14px',
+                  textAlign: 'center',
+                  pointerEvents: 'none'
+                }}
+              >
+                {pointerCaptured
+                  ? 'Input captured. Press Esc once to release the mouse, then press Esc again to open the Quake II menu.'
+                  : 'Click anywhere in the game to capture mouse and keyboard input.'}
+              </Box>
+            </Fade>
           </Box>
         </Main>
 
