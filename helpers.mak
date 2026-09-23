@@ -27,6 +27,13 @@ deploy: checktarget checksshpass build
 		third_party/yquake2/release/quake2 \
 		$(TARGET_USR)@$(TARGET_IP):$(TARGET_DIR)/$(PROG)
 
+# Deploy only the Quake II renderer to an already installed ACAP.
+.PHONY: deployref
+deployref: checktarget checksshpass yquake2-client
+	@sshpass -p '$(TARGET_PWD)' scp -P $(TARGET_SSH_PORT) \
+		third_party/yquake2/release/ref_gles3.so \
+		$(TARGET_USR)@$(TARGET_IP):$(TARGET_DIR)/ref_gles3.so
+
 # Deploy only the built web interface to an already installed ACAP.
 .PHONY: deployweb
 deployweb: checktarget checksshpass web

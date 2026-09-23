@@ -47,6 +47,7 @@ help:
 	@echo "  webdev         Run the local Vite development server"
 	@echo "  install        Build and install the EAP on the target device"
 	@echo "  deploy         Deploy only the Quake II executable"
+	@echo "  deployref      Deploy only the Quake II renderer"
 	@echo "  deployweb      Deploy only the built web UI"
 	@echo "  deployprofile  Deploy the development shell profile"
 	@echo "  logon          Open a shell in the installed ACAP directory"
