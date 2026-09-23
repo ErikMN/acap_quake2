@@ -330,9 +330,18 @@ overlay_context_end_frame(struct overlay_context *overlay)
                     GL_NEAREST);
 
   /*
+   * Quake uses alpha while rendering effects, but alpha in the final Axis
+   * overlay controls whether the video stream shows through.
+   * Keep the finished RGB image and make the complete game frame opaque.
+   */
+  const GLfloat opaque[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+  glClearBufferfv(GL_COLOR, 0, opaque);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+  /*
    * Wait until the GPU has finished writing the image before giving it back to
-   * the camera. Otherwise the video stream could start using an unfinished
-   * frame.
+   * the camera. Otherwise the video stream could start using an unfinished frame.
    */
   glFinish();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
