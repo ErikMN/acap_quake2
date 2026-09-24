@@ -53,7 +53,7 @@ const MyListItem: React.FC<MyListItemProps> = ({
           icon && (
             <icon.type
               {...icon.props}
-              sx={{ color: theme.palette.error.main }}
+              sx={{ color: theme.palette.text.secondary }}
             />
           )
         )}
@@ -62,7 +62,7 @@ const MyListItem: React.FC<MyListItemProps> = ({
         sx={{
           fontFamily: 'inherit',
           fontSize: fontSize || '16px',
-          color: theme.palette.warning.main
+          color: theme.palette.text.primary
         }}
       >
         {primaryText}
@@ -79,9 +79,9 @@ const InfoBox: React.FC = () => {
     <Box
       sx={{
         border: '1px solid',
-        borderColor: theme.palette.error.main,
+        borderColor: theme.palette.divider,
         borderRadius: '6px',
-        color: theme.palette.warning.light,
+        color: theme.palette.text.primary,
         paddingLeft: '18px !important',
         paddingRight: '18px !important',
         paddingBottom: '10px'
@@ -95,15 +95,16 @@ const InfoBox: React.FC = () => {
           paddingTop: '12px'
         }}
       >
-        <LightbulbIcon sx={{ color: theme.palette.text.primary }} />
+        <LightbulbIcon sx={{ color: theme.palette.text.secondary }} />
         <Typography
           sx={{
             paddingLeft: '10px',
             fontFamily: 'inherit',
-            color: theme.palette.warning.main
+            color: theme.palette.text.primary,
+            fontWeight: 600
           }}
         >
-          TIPS
+          Tips
         </Typography>
       </div>
       <List>

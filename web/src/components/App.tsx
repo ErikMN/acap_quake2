@@ -95,6 +95,7 @@ const AppBar = styled(MuiAppBar, {
   WebkitOverflowScrolling: 'touch',
   scrollbarWidth: 'none',
   backgroundColor: theme.palette.background.paper,
+  color: theme.palette.text.primary,
   backgroundImage: 'none',
   whiteSpace: 'nowrap',
   transition: theme.transitions.create(
@@ -559,7 +560,7 @@ const App: React.FC = () => {
               <Fade in={true} timeout={1000} mountOnEnter unmountOnExit>
                 <Typography
                   variant={isMobile ? 'h6' : 'h5'}
-                  color="text.primary"
+                  sx={{ color: 'text.primary' }}
                   noWrap
                   component="div"
                   style={{
