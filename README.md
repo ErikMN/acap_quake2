@@ -36,13 +36,10 @@ The game currently runs on Axis hardware with:
 - Yamagi Quake II as the ACAP executable
 - GPU rendering through EGL and OpenGL ES 3
 - axoverlay2 output into the camera video stream
-- native `game.so`
-- packaged SDL2 runtime
-- statically linked libwebsockets
-- pinned Quake II demo data fetched during the build
-- direct ACAP start and stop support
-- packaged React web interface with live video and browser controls
-- authenticated WebSocket keyboard and mouse input
+- Pinned Quake II demo data fetched during the build
+- Direct ACAP start and stop support
+- Packaged web interface with live video and browser controls
+- Authenticated WebSocket keyboard and mouse input
 
 The web interface can start and stop the application, display the Axis video
 stream, and capture keyboard and pointer-lock mouse input for Quake II.
@@ -63,7 +60,8 @@ cd acap_quake2
 make acap
 ```
 
-`make acap` initializes the pinned submodules, builds the ACAP SDK container image, builds all application dependencies, and produces an installable `.eap` file in the repository root.
+`make acap` initializes the pinned submodules, builds the ACAP SDK container image, builds all application dependencies,
+and produces an installable `.eap` file in the repository root.
 
 For build details, individual targets, and development workflows, see [docs/BUILD.md](docs/BUILD.md).
 
@@ -78,6 +76,10 @@ Starting the ACAP launches Quake II directly.
 Quake II PAK files are not stored in this repository. The build downloads pinned demo data and verifies it before packaging.
 
 See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for source and provenance information.
+
+## Screenshots
+
+<img src="images/screenshot.png" width="800" alt="screenshot"/>
 
 ## License
 
