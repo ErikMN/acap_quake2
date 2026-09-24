@@ -9,6 +9,9 @@
       "user": {
         "groups": [
           "gpu"
+        ],
+        "conditionalGroups": [
+          "pipewire"
         ]
       }
     }

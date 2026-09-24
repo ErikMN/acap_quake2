@@ -18,7 +18,7 @@
       <strong>⚠️ IMPORTANT ⚠️</strong><br/>
       <strong>This application is not actively maintained.</strong><br/>
       It may not work on all devices or firmware versions.<br/>
-      Requires AXIS OS firmware version <strong>11.11.220</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
+      Requires AXIS OS firmware version <strong>12.5</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
     </td>
   </tr>
 </table>

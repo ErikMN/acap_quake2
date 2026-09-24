@@ -125,6 +125,21 @@ Cross-compiles the pinned SDL2 submodule into:
 build/sdl2-install
 ```
 
+SDL2 is built with its PipeWire audio backend and dynamically loads the device's `libpipewire-0.3.so.0`.
+
+### Audio playback
+
+Quake II selects SDL's `pipewire` audio driver at startup. Playback defaults to `AudioDevice0Output0`.
+Set `PIPEWIRE_NODE` before launching the executable to select another PipeWire output node.
+
+The manifest requests the `pipewire` group conditionally.
+Devices without that group can still install the application, but audio needs access to PipeWire and a usable output.
+The supported Axis PipeWire API requires AXIS OS 12.5 or later.
+
+References: [Axis PipeWire API](https://developer.axis.com/acap/reference/supported-apis/#pipewire),
+[application user permissions](https://developer.axis.com/acap/how-to-guides/configure-application-user/#conditional-groups),
+and [PipeWire stream options](https://docs.pipewire.org/page_man_pipewire_1.html).
+
 ### libwebsockets
 
 ```sh

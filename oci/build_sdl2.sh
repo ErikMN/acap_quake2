@@ -16,6 +16,11 @@ echo "ACAP SDK: $OECORE_SDK_VERSION"
 echo "Compiler: $CC_BIN"
 echo "Host triplet: $HOST_TRIPLET"
 
+if ! pkg-config --exists 'libpipewire-0.3 >= 0.3.20'; then
+  echo "SDL2 audio requires PipeWire development files in the ACAP SDK."
+  exit 1
+fi
+
 rm -rf "$BUILD_DIR" "$PREFIX"
 mkdir -p "$BUILD_DIR" "$PREFIX"
 
@@ -37,7 +42,8 @@ cd "$BUILD_DIR"
   --enable-video-dummy \
   --disable-alsa \
   --disable-pulseaudio \
-  --disable-pipewire \
+  --enable-pipewire \
+  --enable-pipewire-shared \
   --disable-jack \
   --disable-libudev \
   --disable-dbus
