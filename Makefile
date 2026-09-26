@@ -5,8 +5,10 @@ CONTAINER_RUNTIME ?= docker
 DOCKER_TAG := acap_quake2_$(ARCH)
 CONTAINER_TTY_ARG := $(shell if test -t 0; then printf '%s' -t; fi)
 
+# Absolute path to the project root on the host:
 ROOT := $(CURDIR)
 
+# Common options used by all SDK container commands:
 CONTAINER_ARGS := --rm \
 	-u $(shell id -u):$(shell id -g) \
 	-e HOME=$(ROOT) \
@@ -15,10 +17,12 @@ CONTAINER_ARGS := --rm \
 	-v /etc/passwd:/etc/passwd:ro \
 	-v /etc/group:/etc/group:ro
 
+# Run a normal command inside the ACAP SDK container:
 CONTAINER_CMD := $(CONTAINER_RUNTIME) run -i $(CONTAINER_TTY_ARG) \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
+# Run a command inside the SDK container with target device credentials available as environment variables:
 CONTAINER_TARGET_CMD := $(CONTAINER_RUNTIME) run -i $(CONTAINER_TTY_ARG) \
 	$(CONTAINER_ARGS) \
 	-e TARGET_IP=$(TARGET_IP) \
@@ -26,6 +30,7 @@ CONTAINER_TARGET_CMD := $(CONTAINER_RUNTIME) run -i $(CONTAINER_TTY_ARG) \
 	-e TARGET_PWD=$(TARGET_PWD) \
 	$(DOCKER_TAG)
 
+# Open an interactive shell inside the ACAP SDK container:
 CONTAINER_SHELL_CMD := $(CONTAINER_RUNTIME) run -it \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
@@ -36,6 +41,10 @@ include helpers.mak
 
 .DEFAULT_GOAL := build
 
+#==============================================================================#
+# General project targets:
+
+# Print the list of available Make targets:
 .PHONY: help
 help:
 	@echo "Available targets:"
@@ -62,16 +71,22 @@ help:
 	@echo "  clean          Remove generated package and web build files"
 	@echo "  distclean      Remove all generated build artifacts"
 
+# Initialize all Git submodules required by the project:
 .PHONY: submodules
 submodules:
 	git submodule update --init --recursive
 
+#==============================================================================#
+# Main build and package targets:
+
+# Build the complete ACAP package including submodules, container image, and EAP:
 .PHONY: acap
 acap:
 	$(MAKE) submodules
 	$(MAKE) image
 	$(MAKE) eap
 
+# Build the ACAP SDK container image used for cross-compilation:
 .PHONY: image
 image:
 	$(CONTAINER_RUNTIME) build \
@@ -79,58 +94,76 @@ image:
 		-t $(DOCKER_TAG) \
 		./oci
 
+# Build the Quake II client and its required dependencies:
 .PHONY: build
 build: yquake2-client
 
-.PHONY: web
-web:
-	$(CONTAINER_CMD) bash -lc 'cd web && yarn install --frozen-lockfile --cache-folder ../build/yarn-cache && yarn build'
-
-.PHONY: webdev
-webdev:
-	cd web && yarn install --frozen-lockfile && yarn start
-
+# Build the Quake II client, web interface, and final EAP package:
 .PHONY: eap
 eap: yquake2-client web
 	$(CONTAINER_CMD) ./oci/build_eap.sh $(FINAL)
 
+# Build the EAP and install it on the configured target device:
 .PHONY: install
 install: checktarget eap
 	$(CONTAINER_TARGET_CMD) ./oci/eap-install.sh
 
-.PHONY: shell
-shell:
-	$(CONTAINER_SHELL_CMD) bash
+#==============================================================================#
+# Web interface targets:
 
+# Build the production web interface inside the SDK container:
+.PHONY: web
+web:
+	$(CONTAINER_CMD) bash -lc 'cd web && yarn install --frozen-lockfile --cache-folder ../build/yarn-cache && yarn build'
+
+# Run the local Vite development server for the web interface:
+.PHONY: webdev
+webdev:
+	cd web && yarn install --frozen-lockfile && yarn start
+
+#==============================================================================#
+# Quake II and dependency build targets:
+
+# Build the custom SDL2 library used by Quake II:
 .PHONY: sdl2
 sdl2:
 	$(CONTAINER_CMD) ./oci/build_sdl2.sh
 
+# Build the libwebsockets library used by the browser input server:
 .PHONY: libwebsockets
 libwebsockets:
 	$(CONTAINER_CMD) ./oci/build_libwebsockets.sh
 
+# Build the base Yamagi Quake II sources:
 .PHONY: yquake2-core
 yquake2-core:
 	$(CONTAINER_CMD) ./oci/build_yquake2.sh
 
+# Build the ACAP-specific Yamagi Quake II client and renderer:
 .PHONY: yquake2-client
 yquake2-client: sdl2 libwebsockets
 	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh
 
-# Run clang format in Docker:
+#==============================================================================#
+# Source formatting targets:
+
+# Format the C source code with clang-format inside the SDK container:
 .PHONY: indent
 indent:
 	@echo "*** Formatting code"
 	@./scripts/container-clang-format.sh
 
+#==============================================================================#
+# Cleanup targets:
+
+# Remove generated package files and the production web build:
 .PHONY: clean
 clean:
 	$(RM) *.eap *_LICENSE.txt
 	$(RM) package.conf package.conf.orig param.conf
 	$(RM) -r web/build
 
-
+# Remove all generated build artifacts and downloaded dependency outputs:
 .PHONY: distclean
 distclean: clean
 	$(RM) -r build
@@ -139,3 +172,5 @@ distclean: clean
 	$(RM) -r third_party/yquake2/build
 	$(RM) -r third_party/yquake2/debug
 	$(RM) -r third_party/yquake2/release
+
+#==============================================================================#
