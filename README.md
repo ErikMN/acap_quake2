@@ -75,7 +75,7 @@ Starting the ACAP launches Quake II directly.
 
 Quake II PAK files are not stored in this repository. The build downloads pinned demo data and verifies it before packaging.
 
-See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for source and provenance information.
+See [docs/THIRD_PARTY_DATA.md](docs/THIRD_PARTY_DATA.md) for source and provenance information.
 
 ## Screenshots
 

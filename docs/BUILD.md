@@ -205,7 +205,7 @@ third_party/libwebsockets
 Generated build artifacts are kept under `build/` and are not committed.
 
 The EAP build also fetches pinned Quake II demo PAK files and verifies their expected Git blob IDs before packaging them.
-See `THIRD_PARTY_DATA.md` for the exact source information.
+See [docs/THIRD_PARTY_DATA.md](docs/THIRD_PARTY_DATA.md) for the exact source information.
 
 ## Target-side development
 
