@@ -42,6 +42,13 @@ deployref: checktarget checksshpass yquake2-client
 		third_party/yquake2/release/ref_gles3.so \
 		$(TARGET_USR)@$(TARGET_IP):$(TARGET_DIR)/ref_gles3.so
 
+# Deploy only the Quake II autoexec configuration to an already installed ACAP.
+.PHONY: deployconfig
+deployconfig: checktarget checksshpass
+	@sshpass -p '$(TARGET_PWD)' scp -P $(TARGET_SSH_PORT) \
+		config/autoexec.cfg \
+		$(TARGET_USR)@$(TARGET_IP):$(TARGET_DIR)/baseq2/autoexec.cfg
+
 # Deploy only the built web interface to an already installed ACAP:
 .PHONY: deployweb
 deployweb: checktarget checksshpass web
