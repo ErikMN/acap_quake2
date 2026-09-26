@@ -17,7 +17,7 @@ fi
 rm -rf "$BUILD_DIR" "$PREFIX"
 mkdir -p "$BUILD_DIR" "$PREFIX"
 
-read -r -a CC_CMD <<< "$CC"
+read -r -a CC_CMD <<<"$CC"
 
 cmake \
   -S "$LWS_DIR" \

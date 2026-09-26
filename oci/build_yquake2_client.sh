@@ -3,6 +3,18 @@ set -euo pipefail
 
 . /opt/axis/acapsdk/environment-setup*
 
+FINAL=${1:-y}
+
+if [ "$FINAL" = "y" ]; then
+  YQ2_BUILD_TYPE=release
+  YQ2_DEBUG_ARG=()
+  ACAP_BUILD_CFLAGS=(-O2 -DNDEBUG -g0)
+else
+  YQ2_BUILD_TYPE=debug
+  YQ2_DEBUG_ARG=(DEBUG=1)
+  ACAP_BUILD_CFLAGS=(-O0 -g3 -DDEBUG)
+fi
+
 ROOT="$PWD"
 YQ2_DIR="$ROOT/third_party/yquake2"
 SDL_PREFIX="$ROOT/build/sdl2-install"
@@ -50,33 +62,33 @@ make -C "$YQ2_DIR" cleanall
 rm -rf "$ACAP_BUILD_DIR"
 mkdir -p "$ACAP_BUILD_DIR"
 
-read -r -a CC_CMD <<< "$CC"
-read -r -a SDK_CFLAGS <<< "${CFLAGS:-}"
-read -r -a ACAP_CFLAGS <<< "$(pkg-config --cflags $ACAP_PKGS)"
+read -r -a CC_CMD <<<"$CC"
+read -r -a SDK_CFLAGS <<<"${CFLAGS:-}"
+read -r -a ACAP_CFLAGS <<<"$(pkg-config --cflags $ACAP_PKGS)"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
   -c "$ROOT/src/gpu_context.c" -o "$ACAP_BUILD_DIR/gpu_context.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
   -c "$ROOT/src/overlay.c" -o "$ACAP_BUILD_DIR/overlay.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC -pthread \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC -pthread \
   -I"$ROOT/src" -I"$LWS_PREFIX/include" \
   -c "$ROOT/src/input/acap_input.c" -o "$ACAP_BUILD_DIR/acap_input.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC -pthread \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC -pthread \
   -I"$ROOT/src" \
   -c "$ROOT/src/input/input_queue.c" -o "$ACAP_BUILD_DIR/input_queue.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC \
   -I"$ROOT/src" \
   -c "$ROOT/src/input/input_protocol.c" -o "$ACAP_BUILD_DIR/input_protocol.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC \
   -I"$ROOT/src" -I"$YQ2_DIR/src" \
   -c "$ROOT/src/input/yamagi_input.c" -o "$ACAP_BUILD_DIR/yamagi_input.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" -O2 -Wall -fPIC -pthread \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC -pthread \
   -I"$ROOT/src" -I"$LWS_PREFIX/include" \
   -c "$ROOT/src/input/websocket.c" -o "$ACAP_BUILD_DIR/websocket.o"
 
@@ -93,7 +105,9 @@ echo "libwebsockets link flags: $ACAP_CLIENT_LDLIBS"
 make \
   -C "$YQ2_DIR" \
   -j"$(nproc)" \
+  "${YQ2_DEBUG_ARG[@]}" \
   CONFIG_FILE="$CONFIG_FILE" \
+  CFLAGS="${CFLAGS:-} ${ACAP_BUILD_CFLAGS[*]} -Wall -pipe" \
   INCLUDE="-I$SDL_PREFIX/include -I$ROOT/src -DYQ2_ACAP" \
   ACAP_GLES3_OBJS="$ACAP_GLES3_OBJS" \
   ACAP_GLES3_LDLIBS="$ACAP_GLES3_LDLIBS" \
@@ -106,14 +120,14 @@ make \
 echo
 echo "Build results:"
 
-file "$YQ2_DIR/release/quake2"
-file "$YQ2_DIR/release/ref_gles3.so"
-file "$YQ2_DIR/release/baseq2/game.so"
+file "$YQ2_DIR/$YQ2_BUILD_TYPE/quake2"
+file "$YQ2_DIR/$YQ2_BUILD_TYPE/ref_gles3.so"
+file "$YQ2_DIR/$YQ2_BUILD_TYPE/baseq2/game.so"
 
 echo
 echo "quake2 dependencies:"
-readelf -d "$YQ2_DIR/release/quake2" | grep -E 'NEEDED|RPATH|RUNPATH' || true
+readelf -d "$YQ2_DIR/$YQ2_BUILD_TYPE/quake2" | grep -E 'NEEDED|RPATH|RUNPATH' || true
 
 echo
 echo "ref_gles3.so dependencies:"
-readelf -d "$YQ2_DIR/release/ref_gles3.so" | grep -E 'NEEDED|RPATH|RUNPATH' || true
+readelf -d "$YQ2_DIR/$YQ2_BUILD_TYPE/ref_gles3.so" | grep -E 'NEEDED|RPATH|RUNPATH' || true

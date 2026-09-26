@@ -35,6 +35,7 @@ CONTAINER_SHELL_CMD := $(CONTAINER_RUNTIME) run -it \
 	$(CONTAINER_ARGS) \
 	$(DOCKER_TAG)
 
+# Build an optimized production version by default. Set FINAL=n to build with debug symbols:
 FINAL ?= y
 
 include helpers.mak
@@ -137,12 +138,12 @@ libwebsockets:
 # Build the base Yamagi Quake II sources:
 .PHONY: yquake2-core
 yquake2-core:
-	$(CONTAINER_CMD) ./oci/build_yquake2.sh
+	$(CONTAINER_CMD) ./oci/build_yquake2.sh $(FINAL)
 
 # Build the ACAP-specific Yamagi Quake II client and renderer:
 .PHONY: yquake2-client
 yquake2-client: sdl2 libwebsockets
-	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh
+	$(CONTAINER_CMD) ./oci/build_yquake2_client.sh $(FINAL)
 
 #==============================================================================#
 # Source formatting targets:
