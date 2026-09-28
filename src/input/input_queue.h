@@ -7,6 +7,12 @@
 
 #define ACAP_INPUT_QUEUE_CAPACITY 256
 
+/*
+ * Protocol key identifiers.
+ *
+ * These numeric values are part of protocol version 1.
+ * Keep them in sync with the frontend AcapKey enum in QuakeInputHandler.tsx.
+ */
 enum acap_key_code {
   ACAP_KEY_UNKNOWN = 0,
 
@@ -67,6 +73,9 @@ enum acap_key_code {
   ACAP_KEY_COUNT = 52,
 };
 
+/*
+ * Pointer button identifiers use the browser MouseEvent.button numbering supported by the frontend.
+ */
 enum acap_pointer_button {
   ACAP_POINTER_BUTTON_LEFT = 0,
   ACAP_POINTER_BUTTON_MIDDLE = 1,
@@ -80,6 +89,10 @@ enum acap_input_event_type {
   ACAP_INPUT_EVENT_MOUSE,
   ACAP_INPUT_EVENT_BUTTON,
   ACAP_INPUT_EVENT_WHEEL,
+
+  /*
+   * Browser protocol version 1 does not produce text events.
+   */
   ACAP_INPUT_EVENT_TEXT,
   ACAP_INPUT_EVENT_RESET,
 };
@@ -112,6 +125,12 @@ struct acap_input_event {
   } data;
 };
 
+/*
+ * Fixed-size queue that keeps events in arrival order.
+ * A mutex protects it while the WebSocket thread adds events and the Yamagi thread removes them.
+ *
+ * head identifies the oldest event and count is the number of queued events.
+ */
 struct acap_input_queue {
   pthread_mutex_t mutex;
   struct acap_input_event events[ACAP_INPUT_QUEUE_CAPACITY];
@@ -120,8 +139,31 @@ struct acap_input_queue {
   bool initialized;
 };
 
+/*
+ * Initialize an empty queue and its mutex.
+ */
 bool acap_input_queue_init(struct acap_input_queue *queue);
+
+/*
+ * Destroy the queue mutex and reset the queue state.
+ */
 void acap_input_queue_destroy(struct acap_input_queue *queue);
+
+/*
+ * Append an event to the queue.
+ *
+ * Returns false when the queue is full.
+ */
 bool acap_input_queue_push(struct acap_input_queue *queue, const struct acap_input_event *event);
+
+/*
+ * Remove the oldest event from the queue.
+ *
+ * Returns false when the queue is empty.
+ */
 bool acap_input_queue_pop(struct acap_input_queue *queue, struct acap_input_event *event);
+
+/*
+ * Discard every queued event.
+ */
 void acap_input_queue_clear(struct acap_input_queue *queue);

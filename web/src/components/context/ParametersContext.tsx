@@ -1,9 +1,8 @@
 /**
  * ParametersContext
  *
- * Axis devices stores various configuration parameters that can be accessed via
- * the param.cgi endpoint. This context fetches and provides these parameters
- * to the rest of the application.
+ * Axis devices stores various configuration parameters that can be accessed via the param.cgi endpoint.
+ * This context fetches and provides these parameters to the rest of the application.
  *
  * NOTE: Try to NOT rely too much on these parameters in the app!
  */

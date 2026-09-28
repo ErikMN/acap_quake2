@@ -45,8 +45,8 @@ interface CustomPlayerProps {
   readonly onToggleFullscreen?: () => void;
   /**
    * True when the outer player container is currently in fullscreen.
-   * Derived by the parent from !!document.fullscreenElement via the
-   * 'fullscreenchange' event and passed down for UI state (icon/text).
+   * Derived by the parent from !!document.fullscreenElement via the 'fullscreenchange' event
+   * and passed down for UI state (icon/text).
    */
   readonly isFullscreen?: boolean;
 
@@ -55,22 +55,19 @@ interface CustomPlayerProps {
   readonly initialFormat?: Format;
   readonly autoPlay?: boolean;
   /**
-   * Set to true if the camera requires a secure
-   * connection, "https" and "wss" protocols.
+   * Set to true if the camera requires a secure connection, "https" and "wss" protocols.
    */
   readonly secure?: boolean;
   readonly aspectRatio?: number;
   readonly className?: string;
   /**
-   * When playing a recording, the time the video started
-   * (used for labeling with an absolute time) formatted
-   * as an ISO time, e.g.: 2021-02-03T12:21:57.465715Z
+   * When playing a recording, the time the video started (used for labeling with an absolute time)
+   * formatted as an ISO time, e.g.: 2021-02-03T12:21:57.465715Z
    */
   readonly startTime?: string;
   /**
    * When playing a recording, the total duration of the video
-   * if known by the user (and not reported from backend) in
-   * seconds.
+   * if known by the user (and not reported from backend) in seconds.
    */
   readonly duration?: number;
 
@@ -118,8 +115,7 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
 
     useEffect(() => {
       /**
-       * Check if localStorage actually exists, since if you
-       * server side render, localStorage won't be available.
+       * Check if localStorage actually exists, since if you server side render, localStorage won't be available.
        */
       if (window?.localStorage !== undefined) {
         window.localStorage.setItem('vapix', JSON.stringify(vapixParameters));
@@ -217,8 +213,8 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     }, []);
 
     /**
-     * Refresh when changing visibility (e.g. when you leave a tab the
-     * video will halt, so when you return we need to play again).
+     * Refresh when changing visibility
+     * (e.g. when you leave a tab the video will halt, so when you return we need to play again).
      */
     useEffect(() => {
       const cb = () => {
@@ -240,8 +236,8 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     /**
      * Aspect ratio
      *
-     * This needs to be set so make the Container (and Layers) match the size of
-     * the visible image of the video or still image.
+     * This needs to be set so make the Container (and Layers)
+     * match the size of the visible image of the video or still image.
      */
     const naturalAspectRatio = useMemo(() => {
       if (videoProperties === undefined) {
@@ -256,8 +252,7 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     /**
      * Limit video size.
      *
-     * The video size should not expand outside the available container, and
-     * should be recomputed on resize.
+     * The video size should not expand outside the available container, and should be recomputed on resize.
      */
     const limiterRef = useRef<HTMLDivElement>(null);
     useLayoutEffect(() => {
@@ -310,12 +305,11 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     /**
      * Render
      *
-     * Each layer is positioned exactly on top of the visible image, since the
-     * aspect ratio is carried over to the container, and the layers match the
-     * container size.
+     * Each layer is positioned exactly on top of the visible image,
+     * since the aspect ratio is carried over to the container, and the layers match the container size.
      *
-     * There is a layer for the spinner (feedback), a statistics overlay, and a
-     * control bar with play/pause/stop/refresh and a settings menu.
+     * There is a layer for the spinner (feedback), a statistics overlay,
+     * and a control bar with play/pause/stop/refresh and a settings menu.
      */
     return (
       <div

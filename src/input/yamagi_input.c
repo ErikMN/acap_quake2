@@ -10,8 +10,8 @@
 #include "client/header/keyboard.h"
 
 /*
- * Remember what the browser currently holds down. This lets us release every
- * active key and mouse button if focus is lost or the connection disappears.
+ * Track which browser keys and mouse buttons are currently held.
+ * This lets reset handling release them if focus is lost or the connection disappears.
  */
 static bool acap_keys_down[ACAP_KEY_COUNT];
 static bool acap_buttons_down[ACAP_POINTER_BUTTON_FORWARD + 1];
@@ -140,9 +140,8 @@ void
 acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 {
   /*
-   * This runs from Quake's normal input update. The WebSocket thread has only
-   * queued messages up to this point. Turning them into real game input here
-   * keeps all changes to Quake on the game thread where they belong.
+   * This runs from Quake's normal input update. The WebSocket thread only queues events.
+   * Translating them here keeps all changes to Quake on the game thread.
    */
   struct acap_input_event event;
 
@@ -161,8 +160,8 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
 
     case ACAP_INPUT_EVENT_MOUSE:
       /*
-       * Mouse messages contain movement since the previous browser event. Add
-       * each piece together so Quake sees the complete movement for this frame.
+       * Mouse messages contain movement since the previous browser event.
+       * Accumulate those deltas so Quake receives the complete movement for this frame.
        */
       if (mouse_active) {
         *mouse_x += event.data.mouse.dx;

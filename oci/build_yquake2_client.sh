@@ -39,7 +39,7 @@ fi
 export PATH="$SDL_PREFIX/bin:$PATH"
 
 # The ACAP changes are maintained as a patch outside the Yamagi submodule.
-# Restore the pinned revision before applying it so repeated builds start clean.
+# Discard tracked changes at the current submodule commit before applying the patch.
 git -C "$YQ2_DIR" reset --hard HEAD
 
 if ! git -C "$YQ2_DIR" apply --check "$PATCH_FILE"; then
@@ -94,7 +94,8 @@ read -r -a ACAP_CFLAGS <<<"$(pkg-config --cflags $ACAP_PKGS)"
 
 ACAP_GLES3_OBJS="$ACAP_BUILD_DIR/gpu_context.o $ACAP_BUILD_DIR/overlay.o"
 ACAP_GLES3_LDLIBS="$(pkg-config --libs $ACAP_PKGS)"
-ACAP_CLIENT_OBJS="$ACAP_BUILD_DIR/acap_input.o $ACAP_BUILD_DIR/input_queue.o $ACAP_BUILD_DIR/input_protocol.o $ACAP_BUILD_DIR/yamagi_input.o $ACAP_BUILD_DIR/websocket.o"
+ACAP_CLIENT_OBJS="$ACAP_BUILD_DIR/acap_input.o $ACAP_BUILD_DIR/input_queue.o \
+$ACAP_BUILD_DIR/input_protocol.o $ACAP_BUILD_DIR/yamagi_input.o $ACAP_BUILD_DIR/websocket.o"
 
 LWS_LDLIBS="$(PKG_CONFIG_PATH="$LWS_PREFIX/lib/pkgconfig" pkg-config --static --libs libwebsockets)"
 LWS_ARCHIVE="$LWS_PREFIX/lib/libwebsockets.a"

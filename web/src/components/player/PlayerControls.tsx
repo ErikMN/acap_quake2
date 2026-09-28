@@ -228,9 +228,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
   const [totalDuration, setTotalDuration] = useState(initialDuration);
 
-  /* When switching from JPEG (still image) to a live format, ensure totalDuration
-   * becomes Infinity so the LIVE indicator is enabled even if no duration/range
-   * has been reported yet.
+  /* When switching from JPEG (still image) to a live format,
+   * ensure totalDuration becomes Infinity so the LIVE indicator is enabled
+   * even if no duration/range has been reported yet.
    */
   useEffect(() => {
     if (
@@ -248,14 +248,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   /**
    * Progress
    *
-   * Compute progress of played and buffered amounts of media. This includes any
-   * media before the actual start of the video.
+   * Compute progress of played and buffered amounts of media.
+   * This includes any media before the actual start of the video.
    *
-   * The range on videoProperties specifies where we started to play (meaning,
-   * the time corresponding to currentTime = 0), and where the playback stops.
-   * To avoid having to collect extra data about the actual media length, we
-   * treat the end of the range as the end of the actual media (i.e. a simple
-   * way to establish the duration).
+   * The range on videoProperties specifies where we started to play
+   * (meaning, the time corresponding to currentTime = 0), and where the playback stops.
+   * To avoid having to collect extra data about the actual media length,
+   * we treat the end of the range as the end of the actual media (i.e. a simple way to establish the duration).
    *
    * Example:
    *  - range = [0, undefined] => start from the beginning, unknown end
@@ -270,12 +269,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
    *    currentTime               0s ----------------------------- 11s
    *    progress     0 ------------------------------------------- 19s
    *
-   *  So we treat the start of the range as offset for total progress, and the
-   *  end of the range as total duration. That means we do not handle situations
-   *  where the duration is longer than the end of the range.
+   *  So we treat the start of the range as offset for total progress, and the end of the range as total duration.
+   *  That means we do not handle situations where the duration is longer than the end of the range.
    *
-   * When computing progress, if the duration is Infinity (live playback), we
-   * use the total buffered time as a (temporary) duration.
+   * When computing progress, if the duration is Infinity (live playback),
+   * we use the total buffered time as a (temporary) duration.
    */
   const [progress, setProgress] = useState({
     playedFraction: 0,

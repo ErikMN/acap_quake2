@@ -1,8 +1,7 @@
 /**
  * VideoPlayer
  *
- * Main video player component that handles authorization, fullscreen toggling,
- * and video playback through CustomPlayer.
+ * Main video player component that handles authorization, fullscreen toggling, and video playback through CustomPlayer.
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useGlobalContext } from './context/GlobalContext';
@@ -49,9 +48,8 @@ const VideoPlayer: React.FC = () => {
 
   /* Toggle fullscreen
    *
-   * Requests fullscreen on the player container when not already in fullscreen,
-   * otherwise exits fullscreen. Uses the standard Fullscreen API and guards for
-   * missing methods (older browsers) with optional chaining "?.()".
+   * Requests fullscreen on the player container when not already in fullscreen, otherwise exits fullscreen.
+   * Uses the standard Fullscreen API and guards for missing methods (older browsers) with optional chaining "?.()".
    */
   const toggleFullscreen = useCallback(() => {
     const element = playerContainerRef.current;
@@ -72,8 +70,8 @@ const VideoPlayer: React.FC = () => {
 
   /* Listen for fullscreen changes
    *
-   * Updates local state (isFullscreen) whenever the document enters or exits
-   * fullscreen. The state is driven by the presence of document.fullscreenElement.
+   * Updates local state (isFullscreen) whenever the document enters or exits fullscreen.
+   * The state is driven by the presence of document.fullscreenElement.
    * Cleanup removes the event listener on unmount.
    */
   useEffect(() => {

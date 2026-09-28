@@ -1,10 +1,9 @@
 /*
  * Creates the EGL and OpenGL ES context used by Quake on the camera.
  *
- * There is no desktop window, so a small off-screen EGL surface is used only
- * to keep the graphics context active.
+ * There is no desktop window, so a small off-screen EGL surface is used only to keep the graphics context active.
  *
- * The actual game frame is rendered into a separate framebuffer managed by overlay.c.
+ * Frames sent to the video stream use a separate framebuffer managed by overlay.c.
  */
 #include "gpu_context.h"
 
@@ -32,9 +31,6 @@ gpu_context_init(struct gpu_context *gpu)
     EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE,
   };
 
-  /*
-   * Request an OpenGL ES version 3 context.
-   */
   static const EGLint context_attributes[] = {
     EGL_CONTEXT_CLIENT_VERSION,
     3,
@@ -49,14 +45,8 @@ gpu_context_init(struct gpu_context *gpu)
     EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE,
   };
 
-  /*
-   * EGLConfig describes the graphics configuration selected by eglChooseConfig().
-   */
   EGLConfig config;
 
-  /*
-   * eglChooseConfig() writes the number of matching configurations here.
-   */
   EGLint num_configs;
 
   /*
@@ -71,9 +61,6 @@ gpu_context_init(struct gpu_context *gpu)
   gpu->context = EGL_NO_CONTEXT;
   gpu->surface = EGL_NO_SURFACE;
 
-  /*
-   * EGL_NO_DISPLAY means the graphics driver did not provide a usable EGL display.
-   */
   if (gpu->display == EGL_NO_DISPLAY) {
     syslog(LOG_ERR, "Failed to get EGL display");
     return false;
@@ -88,9 +75,6 @@ gpu_context_init(struct gpu_context *gpu)
     goto fail;
   }
 
-  /*
-   * Tell EGL that this context will use OpenGL ES rather than another graphics API.
-   */
   if (!eglBindAPI(EGL_OPENGL_ES_API)) {
     syslog(LOG_ERR, "Failed to bind OpenGL ES");
     goto fail;
@@ -115,10 +99,6 @@ gpu_context_init(struct gpu_context *gpu)
     goto fail;
   }
 
-  /*
-   * Create the small off-screen surface used to keep the graphics context active.
-   * The game image is not rendered into this surface.
-   */
   gpu->surface = eglCreatePbufferSurface(gpu->display, config, surface_attributes);
   if (gpu->surface == EGL_NO_SURFACE) {
     syslog(LOG_ERR, "Failed to create EGL surface");
@@ -161,40 +141,25 @@ fail:
 void
 gpu_context_destroy(struct gpu_context *gpu)
 {
-  /*
-   * There is nothing to clean up if an EGL display was never created.
-   */
   if (gpu->display == EGL_NO_DISPLAY) {
     return;
   }
 
   /*
-   * Release the OpenGL ES context from the current thread before destroying its resources.
+   * Release the context from the current thread before destroying the EGL resources.
    */
   eglMakeCurrent(gpu->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
-  /*
-   * Destroy the small pbuffer surface if it was successfully created.
-   */
   if (gpu->surface != EGL_NO_SURFACE) {
     eglDestroySurface(gpu->display, gpu->surface);
   }
 
-  /*
-   * Destroy the OpenGL ES context if it was successfully created.
-   */
   if (gpu->context != EGL_NO_CONTEXT) {
     eglDestroyContext(gpu->display, gpu->context);
   }
 
-  /*
-   * Shut down the EGL connection to the graphics driver.
-   */
   eglTerminate(gpu->display);
 
-  /*
-   * Reset all handles so the structure clearly represents an uninitialized graphics context.
-   */
   gpu->display = EGL_NO_DISPLAY;
   gpu->context = EGL_NO_CONTEXT;
   gpu->surface = EGL_NO_SURFACE;

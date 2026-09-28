@@ -172,9 +172,9 @@ const QuakeInputHandler = ({
     };
 
     /*
-     * The browser can lose focus without sending normal key-up events. Tell the
-     * game to release everything whenever that happens so controls cannot get
-     * stuck after switching tabs or leaving mouse capture.
+     * The browser can lose focus without sending normal key-up events.
+     * Tell the game to release everything whenever that happens
+     * so controls cannot get stuck after switching tabs or leaving mouse capture.
      */
     const resetInput = () => {
       send(new Uint8Array([PROTOCOL_VERSION, MessageType.Reset]).buffer);
@@ -183,9 +183,9 @@ const QuakeInputHandler = ({
     };
 
     /*
-     * Send small fixed-size messages instead of text. The first bytes say what
-     * kind of input this is, and the remaining bytes contain only the values
-     * needed for that event.
+     * Send small fixed-size messages instead of text.
+     * The first bytes say what kind of input this is,
+     * and the remaining bytes contain only the values needed for that event.
      */
     const sendKey = (key: AcapKey, down: boolean) => {
       const packet = new ArrayBuffer(5);
@@ -255,7 +255,8 @@ const QuakeInputHandler = ({
 
       if (
         eventTarget?.closest(
-          'button, input, select, textarea, a, [role="button"], [role="menuitem"], [role="slider"], [role="combobox"], [role="listbox"]'
+          'button, input, select, textarea, a, [role="button"], [role="menuitem"], ' +
+            '[role="slider"], [role="combobox"], [role="listbox"]'
         )
       ) {
         return;
@@ -310,9 +311,9 @@ const QuakeInputHandler = ({
     };
 
     /*
-     * Mouse capture gives movement rather than a screen position. That lets the
-     * player keep turning in either direction without the pointer reaching the
-     * edge of the browser window.
+     * Mouse capture gives movement rather than a screen position.
+     * That lets the player keep turning in either direction
+     * without the pointer reaching the edge of the browser window.
      */
     const handleMouseMove = (event: MouseEvent) => {
       if (document.pointerLockElement !== target) {

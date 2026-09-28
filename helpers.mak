@@ -91,7 +91,8 @@ kill: checktarget checksshpass
 checksdk: checktarget
 	@curl --anyauth --insecure --noproxy "*" \
 		-u '$(TARGET_USR):$(TARGET_PWD)' \
-		'$(TARGET_PROTOCOL)://$(TARGET_IP):$(TARGET_PORT)/axis-cgi/admin/param.cgi?action=list&group=Properties.EmbeddedDevelopment'
+		--get --data 'action=list&group=Properties.EmbeddedDevelopment' \
+		'$(TARGET_PROTOCOL)://$(TARGET_IP):$(TARGET_PORT)/axis-cgi/admin/param.cgi'
 
 # Open the ACAP setting page in the default browser on Linux:
 .PHONY: openweb

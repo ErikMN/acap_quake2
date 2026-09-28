@@ -33,12 +33,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR=${SCRIPT_DIR%/web}
 
 # HACK: Don't pollute git status with modified .vscode stuff (disable: --no-skip-worktree)
-# https://stackoverflow.com/questions/1274057/how-do-i-make-git-forget-about-a-file-that-was-tracked-but-is-now-in-gitignore
+# https://stackoverflow.com/questions/1274057
 # Safely mark .vscode files as skip-worktree (only if they are tracked)
 if [ -d "$SCRIPT_DIR/.vscode" ]; then
 	for file in "$SCRIPT_DIR"/.vscode/*; do
 		if git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
-			git update-index --skip-worktree "$file" || echo "${FMT_YELLOW}WARNING: Failed to mark $file as skip-worktree${FMT_RESET}"
+			git update-index --skip-worktree "$file" ||
+				echo "${FMT_YELLOW}WARNING: Failed to mark $file as skip-worktree${FMT_RESET}"
 		else
 			echo "${FMT_WHITE}INFO: Skipping untracked file $file${FMT_RESET}"
 		fi
@@ -137,6 +138,7 @@ else
 fi
 
 # Success: Print info and exit:
-echo "${FMT_BOLD}${FMT_GREEN}*** ACAP project $packagename for ""${FMT_WHITE}""$TARGET_IP${FMT_GREEN}" initialized"${FMT_RESET}"
+echo "${FMT_BOLD}${FMT_GREEN}*** ACAP project $packagename" \
+	"for ${FMT_WHITE}${TARGET_IP}${FMT_GREEN} initialized${FMT_RESET}"
 echo "${FMT_BLUE}*** Credentials exported${FMT_RESET}"
 echo "*** Run 'make help' to get started"

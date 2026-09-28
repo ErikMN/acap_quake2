@@ -3,8 +3,7 @@ import { useScreenSizes } from '../../helpers/hooks.jsx';
 
 /**
  * The limiter prevents the video element to use up all of the available width.
- * The player container will automatically limit it's own height based on the
- * available width (keeping aspect ratio).
+ * The player container will automatically limit it's own height based on the available width (keeping aspect ratio).
  */
 export const Limiter = forwardRef<HTMLDivElement, PropsWithChildren>(
   ({ children }, ref) => {

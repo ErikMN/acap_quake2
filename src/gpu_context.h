@@ -33,7 +33,6 @@ bool gpu_context_init(struct gpu_context *gpu);
 /*
  * Release all EGL resources created by gpu_context_init().
  *
- * It is safe to call this after a partial initialization because gpu_context_init()
- * keeps unused handles in their EGL_NO_* state.
+ * It is safe to call this after partial initialization because unused handles remain in their EGL_NO_* state.
  */
 void gpu_context_destroy(struct gpu_context *gpu);

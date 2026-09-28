@@ -27,7 +27,7 @@
       <strong>⚠️ IMPORTANT ⚠️</strong><br/>
       <strong>This application is NOT actively maintained.</strong><br/>
       It may not work on all devices or firmware versions.<br/>
-      Requires AXIS OS firmware version <strong>12.5</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
+      Requires AXIS OS firmware version <strong>12.11</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
     </td>
   </tr>
 </table>
@@ -36,9 +36,9 @@
 
 [Yamagi Quake II](https://www.yamagi.org/quake2/) running as an ACAP application on Axis devices.
 
-The project targets aarch64 Axis devices based on **ARTPEC-8 and newer**.
+The project targets Axis devices based on **ARTPEC-8 and newer**.
 
-Quake II is rendered with OpenGL ES 3 through axoverlay2 and appears directly in the Axis video stream.
+Quake II is rendered with OpenGL ES 3 through axoverlay2 and appears directly in the video stream.
 
 ## Status
 
@@ -49,7 +49,6 @@ The game currently runs on Axis hardware with:
 - axoverlay2 output into the camera video stream
 - Pinned Quake II demo data fetched during the build
 - Included web interface with live video and browser controls
-- Authenticated WebSocket keyboard and mouse input
 
 The web interface can start and stop the application, display the Axis video
 stream, and capture keyboard and pointer-lock mouse input for Quake II.

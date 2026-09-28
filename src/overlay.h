@@ -56,7 +56,8 @@ struct overlay_context {
   void *current_buffer;
 
   /*
-   * File descriptor used to wait for new VDO stream events.
+   * File descriptor that can signal new VDO stream events.
+   * The current renderer checks events at the start of each frame instead of waiting on it.
    */
   int event_fd;
 
@@ -102,7 +103,7 @@ struct overlay_context {
   unsigned render_texture;
 
   /*
-   * Private OpenGL framebuffer that Quake renders into each frame.
+   * Private OpenGL framebuffer that receives Quake's final image during an active output frame.
    */
   unsigned render_framebuffer;
 
@@ -114,7 +115,7 @@ struct overlay_context {
   /*
    * Number of successfully submitted overlay frames.
    *
-   * This is used for progress logging and by the built-in test renderer.
+   * This is used for progress logging and by the test-frame helper.
    */
   unsigned frame_count;
 
@@ -135,7 +136,7 @@ struct overlay_context {
 bool overlay_context_init(struct overlay_context *overlay);
 
 /*
- * Remove the active axoverlay2 overlay, release imported buffers and stop VDO and axoverlay2 resources.
+ * Release the overlay and its graphics resources, release the VDO event stream and stop axoverlay2.
  *
  * This can also be used to clean up after a partial initialization failure.
  */
@@ -144,7 +145,7 @@ void overlay_context_destroy(struct overlay_context *overlay);
 /*
  * Return the file descriptor used to receive VDO stream events.
  *
- * The caller can wait on this descriptor instead of repeatedly checking for stream changes.
+ * The caller can wait on this descriptor for stream changes. The current Yamagi integration does not use it.
  */
 int overlay_context_get_event_fd(const struct overlay_context *overlay);
 
@@ -162,11 +163,12 @@ bool overlay_context_process_events(struct overlay_context *overlay);
 /*
  * Prepare the output path for a new Quake frame.
  *
- * This processes pending VDO events, requests the next available axoverlay2 buffer and binds
- * Quake's private framebuffer so the game can render into it.
+ * This processes pending VDO events and requests the next available axoverlay2 buffer.
+ * When a buffer is available, it binds Quake's private framebuffer so the game can render into it.
  *
  * Returns true when rendering may continue.
- * A true result can also mean that no overlay buffer is currently available and the frame should be skipped.
+ * A true result can also mean that no overlay buffer is currently available.
+ * Rendering still continues, but there is no overlay buffer to submit for that frame.
  * Returns false if an unexpected error occurs.
  */
 bool overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_context *gpu);
@@ -182,17 +184,17 @@ void overlay_context_bind_frame(struct overlay_context *overlay);
  * Finish the current Quake frame and submit it to axoverlay2.
  *
  * The completed game image is copied from Quake's private framebuffer into the current axoverlay2 buffer.
- * The final alpha channel is made fully opaque, the GPU is allowed to finish its work and the buffer is submitted.
+ * The final alpha channel is made fully opaque, the code waits for GPU writes to finish and the buffer is submitted.
  *
- * Returns true when the frame was completed or there was no frame to submit.
- * Returns false if the buffer could not be submitted because of an unexpected error.
+ * Returns true when the frame was handled without an unexpected error, including when there was nothing to submit.
+ * Returns false if buffer submission fails for an unexpected reason.
  */
 bool overlay_context_end_frame(struct overlay_context *overlay);
 
 /*
- * Render a simple changing color through the same overlay path used by Quake.
+ * Test helper: render a simple changing color through the same overlay path used by Quake.
  *
- * This is useful for testing VDO, axoverlay2, EGL and OpenGL integration without depending on the game renderer.
+ * This tests the overlay output without depending on the game renderer. Yamagi does not call this function.
  *
  * Returns true when the test frame was handled successfully.
  * Returns false if preparing or submitting the frame fails.
