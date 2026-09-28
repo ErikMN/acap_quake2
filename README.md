@@ -16,7 +16,9 @@
   <tr>
     <td align="center">
       <strong>⚠️ UNOFFICIAL APP ⚠️</strong><br/>
-      Requires unsigned ACAP packages to be enabled on the device (no longer an option with AXIS OS 13).
+      Install a signed ACAP package, or enable unsigned installation for development.<br/>
+      Unsigned packages require <strong>Allow unsigned apps</strong> on AXIS OS 12.11,
+      or <strong>Developer Mode</strong> on AXIS OS 13.
     </td>
   </tr>
 </table>
@@ -27,18 +29,21 @@
       <strong>⚠️ IMPORTANT ⚠️</strong><br/>
       <strong>This application is NOT actively maintained.</strong><br/>
       It may not work on all devices or firmware versions.<br/>
-      Requires AXIS OS firmware version <strong>12.5</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
+      Requires AXIS OS firmware version <strong>12.11</strong> or later, and is validated up to AXIS OS <strong>13</strong>.
     </td>
   </tr>
 </table>
 
 ## What is this?
 
-[Yamagi Quake II](https://www.yamagi.org/quake2/) running as an ACAP application on Axis devices.
+[**Yamagi Quake II**](https://www.yamagi.org/quake2/) running as an ACAP application on Axis devices.
 
-The project targets aarch64 Axis devices based on **ARTPEC-8 and newer**.
+The project targets Axis devices based on **ARTPEC-8 and newer**.
 
-Quake II is rendered with OpenGL ES 3 through axoverlay2 and appears directly in the Axis video stream.
+Quake II is rendered with [OpenGL ES 3](https://www.khronos.org/opengles/) through [axoverlay2](https://developer.axis.com/acap/acap-native-sdk-version-12/api/src/api/axoverlay_v2/html/introduction.html)
+and appears directly in the video stream.
+
+For an explanation of browser input and rendering, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Status
 
@@ -49,7 +54,6 @@ The game currently runs on Axis hardware with:
 - axoverlay2 output into the camera video stream
 - Pinned Quake II demo data fetched during the build
 - Included web interface with live video and browser controls
-- Authenticated WebSocket keyboard and mouse input
 
 The web interface can start and stop the application, display the Axis video
 stream, and capture keyboard and pointer-lock mouse input for Quake II.
@@ -117,10 +121,15 @@ More info [here](https://www.axis.com/developer-community/open-source/acap).
 
 ### Q: Why does it not install?
 
-**A:** You will need either [sign the ACAP package](https://www.axis.com/support/acap-signing) or enable unsigned ACAP
-packages *(no longer an option with AXIS OS 13 unless using a developer mode device)* on the Apps page:
-**`Allow unsigned apps`**
+**A:** Install a [signed ACAP package](https://www.axis.com/support/acap-signing), or allow unsigned installation:
+
+- On AXIS OS 12.11, enable **Allow unsigned apps** on the Apps page.
+- On AXIS OS 13, unsigned installation requires [Developer Mode][developer-mode] for your device.
+
 Also ensure that the application matches the device architecture.
+
+[developer-mode]:
+  https://developer.axis.com/acap/13-alpha/get-started/set-up-developer-environment/set-up-device-advanced/
 
 ### Q: Why am I not hearing any sounds?
 
@@ -134,7 +143,7 @@ Also ensure that the application matches the device architecture.
 
 **A:** This project is primarily a technical experiment demonstrating what is possible with the ACAP SDK.
 
-## Screenshots
+## Screenshot
 
 <img src="images/screenshot.png" width="800" alt="screenshot"/>
 

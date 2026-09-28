@@ -37,9 +37,8 @@ bool
 acap_input_queue_push(struct acap_input_queue *queue, const struct acap_input_event *event)
 {
   /*
-   * Browser input arrives on one thread while Quake reads it on another. The
-   * lock makes each change to the queue happen as one complete operation, so
-   * the game never sees an event while it is only partly written.
+   * Browser input arrives on one thread while Quake reads it on another.
+   * The lock completes each queue update before the other thread can access it.
    */
   bool pushed = false;
 
@@ -61,9 +60,8 @@ bool
 acap_input_queue_pop(struct acap_input_queue *queue, struct acap_input_event *event)
 {
   /*
-   * Events leave the queue in the same order they arrived. This matters for
-   * pairs such as key down followed by key up, where reversing them could leave
-   * a control stuck in the wrong state.
+   * Events leave the queue in the same order they arrived.
+   * Reversing a key-down and key-up pair could leave a control stuck in the wrong state.
    */
   bool popped = false;
 

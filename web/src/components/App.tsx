@@ -841,7 +841,8 @@ const App: React.FC = () => {
                 }}
               >
                 {pointerCaptured
-                  ? 'Input captured. Press Esc once to release the mouse, then press Esc again to open the Quake II menu.'
+                  ? 'Input captured. Press Esc once to release the mouse, ' +
+                    'then press Esc again to open the Quake II menu.'
                   : 'Click anywhere in the game to capture mouse and keyboard input.'}
               </Box>
             </Fade>

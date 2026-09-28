@@ -1,9 +1,9 @@
 /**
  * LoadingScreen
  *
- * This component displays a loading screen while the application is
- * initializing. It checks the system readiness via systemready.cgi and waits
- * until the system and parameter context are ready before rendering the app.
+ * This component displays a loading screen while the application is initializing.
+ * It checks the system readiness via systemready.cgi
+ * and waits until the system and parameter context are ready before rendering the app.
  */
 import React, { useEffect, useState } from 'react';
 import { useGlobalContext } from './context/GlobalContext';

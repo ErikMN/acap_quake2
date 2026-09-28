@@ -96,12 +96,14 @@ for CONTAINER_PATH in "${CONTAINER_PATHS[@]}"; do
 	if [ ! -e "$OUTPUT_DIR/$CONTAINER_PATH_BASENAME" ]; then
 		# Attempt to copy the specified file or directory from the temporary container to the output directory:
 		if "$CONTAINER_RUNTIME" cp "$CONTAINER_ID:$CONTAINER_PATH" "$OUTPUT_DIR"; then
-			echo "${FMT_BOLD}${FMT_GREEN}Successfully copied '$CONTAINER_PATH' to $OUTPUT_DIR/$CONTAINER_PATH_BASENAME from $IMAGE_NAME${FMT_RESET}"
+			echo "${FMT_BOLD}${FMT_GREEN}Successfully copied '$CONTAINER_PATH'" \
+				"to $OUTPUT_DIR/$CONTAINER_PATH_BASENAME from $IMAGE_NAME${FMT_RESET}"
 		else
 			echo "${FMT_RED}Error: Failed to copy $CONTAINER_PATH${FMT_RESET}"
 			# Continue with the next file or directory
 		fi
 	else
-		echo "${FMT_BOLD}${FMT_YELLOW}The '$CONTAINER_PATH' file or directory already exists in the output directory.${FMT_RESET}"
+		echo "${FMT_BOLD}${FMT_YELLOW}The '$CONTAINER_PATH' file or directory" \
+			"already exists in the output directory.${FMT_RESET}"
 	fi
 done

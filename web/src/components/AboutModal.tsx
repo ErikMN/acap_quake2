@@ -1,8 +1,8 @@
 /**
  * AboutModal
  *
- * This component displays an "About" modal dialog with application
- * information, including version, license, and link to GitHub.
+ * This component displays an "About" modal dialog with application information,
+ * including version, license, and link to GitHub.
  */
 import React from 'react';
 import AppVersion from './AppVersion';

@@ -2,11 +2,10 @@
 /// <reference types="vite-plugin-svgr/client" />
 /**
  * Declare a module for files with the `.oga` extension.
- * This is necessary because TypeScript does not natively understand
- * non-code assets like audio files.
+ * This is necessary because TypeScript does not natively understand non-code assets like audio files.
  *
- * When you import an `.oga` file, TypeScript will treat it as a module
- * that exports a string (typically the URL of the asset after being processed by Vite).
+ * When you import an `.oga` file, TypeScript will treat it as a module that exports a string
+ * (typically the URL of the asset after being processed by Vite).
  */
 declare module '*.oga' {
   /**

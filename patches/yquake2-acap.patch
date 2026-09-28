@@ -10,7 +10,7 @@ diff --git a/Makefile b/Makefile
  endif
  
  # q2ded
-@@ -1392,9 +1392,9 @@
+@@ -1392,9 +1392,11 @@
  	@echo "===> LD $@"
  	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
  else
@@ -19,7 +19,9 @@ diff --git a/Makefile b/Makefile
 -	${Q}$(CC) $(LDFLAGS) $(REFGLES3_OBJS) $(LDLIBS) $(SDLLDFLAGS) -o $@
 +$(BINDIR)/ref_gles3.so : $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS)
 +	@echo "===> LD $@"
-+	${Q}$(CC) $(LDFLAGS) -Wl,-z,origin,-rpath='$$ORIGIN/lib' $(REFGLES3_OBJS) $(ACAP_GLES3_OBJS) $(LDLIBS) $(ACAP_GLES3_LDLIBS) $(SDLLDFLAGS) -o $@
++	${Q}$(CC) $(LDFLAGS) -Wl,-z,origin,-rpath='$$ORIGIN/lib' \
++		$(REFGLES3_OBJS) $(ACAP_GLES3_OBJS) $(LDLIBS) $(ACAP_GLES3_LDLIBS) \
++		$(SDLLDFLAGS) -o $@
  endif
  
  # ref_soft.so
