@@ -222,8 +222,9 @@ Generated files are not committed. Their main locations are:
 - `web/build/` for the production web UI
 - the repository root for the finished `.eap`
 
-The EAP build fetches pinned Quake II demo PAK files and verifies their expected Git blob IDs before packaging.
-See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for the exact source information.
+The EAP build downloads the Quake II 3.14 demo installer from the mirror documented by Yamagi Quake II.
+It verifies the installer before extraction and packages only the demo `baseq2/pak0.pak` and `baseq2/players/` data.
+See [THIRD_PARTY_DATA.md](THIRD_PARTY_DATA.md) for the exact source and checksum information.
 
 ## Target-side development
 

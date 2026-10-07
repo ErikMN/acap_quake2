@@ -22,7 +22,8 @@ RUN DEBIAN_FRONTEND=noninteractive \
         git \
         gnupg \
         ninja-build \
-        pkgconf && \
+        pkgconf \
+        unzip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
