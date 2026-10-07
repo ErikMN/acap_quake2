@@ -609,7 +609,7 @@ diff --git a/src/client/input/sdl2.c b/src/client/input/sdl2.c
 diff --git a/src/backends/unix/main.c b/src/backends/unix/main.c
 --- a/src/backends/unix/main.c
 +++ b/src/backends/unix/main.c
-@@ -45,10 +45,49 @@
+@@ -45,10 +45,48 @@
  	// register signal handler
  	registerHandler();
  
@@ -622,7 +622,7 @@ diff --git a/src/backends/unix/main.c b/src/backends/unix/main.c
 +
 +#ifdef YQ2_ACAP
 +	const char *acap_package_dir = Sys_GetBinaryDir();
-+	const int acap_default_argc = 16;
++	const int acap_default_argc = 15;
 +	char **acap_argv = calloc((size_t)argc + acap_default_argc + 1, sizeof(*acap_argv));
 +
 +	if (!acap_argv)
@@ -647,8 +647,7 @@ diff --git a/src/backends/unix/main.c b/src/backends/unix/main.c
 +	acap_argv[acap_argc++] = "+set";
 +	acap_argv[acap_argc++] = "r_vsync";
 +	acap_argv[acap_argc++] = "0";
-+	acap_argv[acap_argc++] = "+map";
-+	acap_argv[acap_argc++] = "q2dm1";
++	acap_argv[acap_argc++] = "+newgame";
 +
 +	for (int i = 1; i < argc; i++)
 +	{
