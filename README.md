@@ -87,9 +87,11 @@ Starting the ACAP launches Quake II directly.
 
 ## Game data
 
-Quake II PAK files are not stored in this repository. The build downloads pinned demo data and verifies it before packaging.
+Quake II game data is not stored in this repository.
+The build downloads the Quake II 3.14 demo installer from the mirror documented by Yamagi Quake II,
+verifies it, and packages the demo `pak0.pak` and `players/` data.
 
-See [docs/THIRD_PARTY_DATA.md](docs/THIRD_PARTY_DATA.md) for source and provenance information.
+See [docs/THIRD_PARTY_DATA.md](docs/THIRD_PARTY_DATA.md) for source, checksum, and provenance information.
 
 ## FAQ
 
