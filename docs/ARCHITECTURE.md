@@ -95,6 +95,10 @@ and the saved video parameters. It passes these settings to
 [`CustomPlayer.tsx`](../web/src/components/player/CustomPlayer.tsx), which uses `PlaybackArea`
 from `media-stream-player` to display the stream.
 
+When the page becomes hidden, the web player stops its video connection.
+When the page becomes visible again, it explicitly refreshes `PlaybackArea` so a fresh stream connection is established
+without requiring the user to press the Refresh button.
+
 Video playback and game input use separate connections.
 The browser sends controls through the ACAP `input` WebSocket endpoint
 while the player receives the camera video stream.
@@ -188,32 +192,58 @@ The code uses three systems with separate roles:
 It opens VDO stream 0 to receive overlay-related stream events, not to display the game on stream 0.
 The renderer checks for existing, created, and closed streams during setup and at the start of each frame.
 
-When an existing or newly created stream is reported, the code reads its stream ID, width, and height.
-It then calls `create_overlay()`.
+When an existing or newly created stream is reported, the code reads its stream ID, width, and height
+and creates or updates a persistent stream record keyed by VDO stream ID.
+The record is separate from the concrete axoverlay2 overlay and therefore survives temporary overlay failures.
 
-If the active stream closes, `remove_overlay()` releases the resources associated with that overlay.
+Each record carries a monotonically changing **stream generation**.
+A `CLOSED` event ends the current generation.
+If the same stream ID later appears again, the new instance receives a newer generation.
 
-The code keeps at most one active overlay.
-The first stream for which `create_overlay()` succeeds gets the overlay.
-Further stream events do not create another overlay while it remains active.
-The code does not keep a list of other streams to switch to when that stream closes.
+Every blocking axoverlay2 operation captures the generation it started for.
+When that operation returns, its result may change stream lifecycle state only if the captured generation is still current.
+This establishes an explicit precedence rule: **newer VDO lifecycle events win over older SDK results**.
+For example, a late `AXO_ERR_NO_STREAM` from an old acquisition cannot remove a stream which has already reopened.
+
+Overlay creation also captures the stream dimensions it was requested for.
+A creation result is accepted only if both the stream generation and requested dimensions still match.
+If the same stream ID reports new dimensions while creation is running, the old overlay is discarded and the worker
+immediately creates a replacement from the newest dimensions.
+
+Concrete overlay creation is retried after a short delay when a stream-local failure occurs.
+The browser does not need to reopen the stream to trigger that retry.
+
+A stream can also close between a `CREATED` event and the subsequent VDO information lookup.
+Expected stream-disappearance errors are handled locally instead of propagating into Yamagi's fatal renderer path.
+
+Closed stream records are retained while an SDK operation, concrete overlay, outstanding buffer, or render-side cache
+can still refer to them. Once all of that state is gone, the record is pruned.
+This keeps stream ID reuse and stale asynchronous results unambiguous without accumulating inactive records indefinitely.
+
+This follows the axoverlay2 lifecycle directly: each concrete overlay still belongs to one video stream,
+while VDO events determine which stream instance is current.
 
 ### Render size
 
-`create_overlay()` chooses the size of the image that Quake renders.
+Each stream overlay chooses its own output size.
 
-If both stream dimensions are divisible by two, Quake renders at half width and half height.
-The overlay is then configured with 2x upscaling.
+If both stream dimensions are divisible by two, that stream uses an overlay at half width and half height
+with axoverlay2 2x upscaling. A 1920x1080 stream therefore uses a 960x540 overlay buffer.
+If either dimension is not divisible by two, that stream uses the full stream size.
 
-A 1920x1080 video stream therefore uses a 960x540 Quake render target.
+Quake itself still renders once per game frame.
+The first successfully created concrete overlay selects the shared Quake render-target size.
+After that, the render target stays at the same size while VDO still considers at least one stream present.
+Temporary overlay removal and recreation therefore do not resize Quake's output.
 
-If either stream dimension is not divisible by two, Quake renders at the full stream size.
+Additional streams may use different overlay dimensions; the completed Quake image is scaled by the GPU
+when it is copied into each stream overlay.
 
-`overlay_context.width` and `overlay_context.height` store the size used by Quake.
-`full_width` and `full_height` store the allocated axoverlay2 buffer size.
-The code first asks axoverlay2 for the required size, then rounds both dimensions up to multiples of 16.
-These extra pixels satisfy buffer layout requirements.
-They do not increase the Quake render size.
+When VDO reports that no stream remains present, the shared render target is released.
+The next stream that later appears can therefore select a new Quake render size.
+
+Each stream record stores its used overlay width and height plus the full aligned axoverlay2 buffer dimensions.
+The alignment padding satisfies buffer layout requirements and does not increase the visible image size.
 
 ## 5. Private Quake framebuffer
 
@@ -228,17 +258,23 @@ It creates:
 During an active output frame, Yamagi places its final image in this private framebuffer.
 It can use temporary framebuffers for intermediate rendering.
 
-This gives Yamagi one stable final render target while axoverlay2 manages its own set of output buffers.
+This gives Yamagi one stable final render target regardless of how many camera streams are active.
+After Yamagi finishes the frame, the same completed color image is copied on the GPU into each active
+stream overlay that has a free output buffer.
 
-The completed color image is then copied into the current axoverlay2 buffer on the GPU.
 The [frame lifecycle](#7-frame-lifecycle) below shows the complete sequence.
 
 ## 6. Importing axoverlay2 buffers
 
-`overlay_context_begin_frame()` requests an output buffer with `axo_get_buffer()`.
+The serialized SDK worker calls `axo_get_buffer()`.
+When acquisition succeeds, it extracts the buffer ID and DMA-BUF descriptor while it is still the only thread
+accessing axoverlay2, then publishes only that primitive metadata to the render thread.
 
-Each axoverlay2 buffer has a stable buffer ID.
-`overlay.c` uses that ID to check whether the buffer has already been imported.
+`overlay_context_begin_frame()` never calls axoverlay2.
+It consumes only buffers which are already marked ready by the SDK worker.
+
+Each axoverlay2 buffer has a stable buffer ID within its concrete overlay.
+`overlay.c` uses that ID together with the concrete-overlay epoch to decide whether the buffer has already been imported.
 
 A new buffer is imported by `create_render_surface()`.
 
@@ -276,60 +312,100 @@ A `render_surface` stores these EGL and OpenGL objects, the buffer ID, and a dep
 The texture and EGL image refer to the same color buffer.
 Importing it does not copy the completed game image.
 
-Imported surfaces are stored in a linked list.
-When axoverlay2 returns the same buffer again, the existing `render_surface` is reused.
+Each stream overlay owns its own linked list of imported surfaces.
+Buffer IDs identify buffers returned by a concrete overlay, so keeping the caches per stream makes the ownership explicit
+and prevents a buffer ID from one overlay from being mistaken for a buffer belonging to another stream.
+When axoverlay2 returns the same buffer for that stream again, the existing `render_surface` is reused.
 
 ## 7. Frame lifecycle
 
-A frame with an available overlay buffer follows this path:
+Acquisition and submission are asynchronous relative to the game frame.
+The render thread consumes buffers which the SDK worker acquired earlier, then hands completed buffers back to that worker:
 
 ```mermaid
 flowchart TD
-    Begin[Begin frame]
-    Events[Process VDO events]
-    Acquire[axo_get_buffer]
-    Known{Buffer already imported}
-    Reuse[Reuse render surface]
-    Import[Import buffer]
-    Bind[Bind private Quake framebuffer]
-    Render[Yamagi renders frame]
-    Blit[Copy into axoverlay2 buffer]
-    Alpha[Set final alpha to 1.0]
-    Finish[glFinish]
-    Submit[axo_submit_buffer]
-    Video[Camera video stream]
+    subgraph SDK[Serialized SDK worker]
+        Acquire[Acquire one overlay buffer]
+        Ready[Publish ready buffer metadata]
+        Submit[Submit rendered buffer]
+    end
 
-    Begin --> Events --> Acquire --> Known
-    Known -->|Yes| Reuse --> Bind
-    Known -->|No| Import --> Bind
-    Bind --> Render --> Blit --> Alpha --> Finish --> Submit --> Video
+    subgraph Game[Yamagi render thread]
+        Begin[Begin frame]
+        Events[Process VDO events]
+        Poll[Claim already-ready buffers]
+        Bind[Bind shared private Quake framebuffer]
+        Render[Yamagi renders one frame]
+        Blit[Copy frame into claimed overlay buffers]
+        Alpha[Set final alpha to 1.0]
+        Finish[One glFinish for all GPU copies]
+        Queue[Queue rendered buffers for submission]
+    end
+
+    Video[Camera video streams]
+
+    Acquire --> Ready --> Poll
+    Begin --> Events --> Poll
+    Poll --> Bind --> Render --> Blit --> Alpha --> Finish --> Queue
+    Queue --> Submit --> Video
+    Submit --> Acquire
 ```
 
 ### Beginning the frame
 
-`overlay_context_begin_frame()` first processes pending VDO events.
-If an overlay exists, it asks axoverlay2 for the next available buffer.
+Axoverlay2 defines `axo_get_buffer()` as a blocking synchronous call with a platform-dependent timeout.
+The SDK implementation also uses process-wide request and bookkeeping state, so this application does not call
+axoverlay2 concurrently from multiple threads.
 
-If there is no overlay, or buffer acquisition reports `AXO_ERR_WAIT` or `AXO_ERR_NO_STREAM`,
-`overlay_context_begin_frame()` returns true with no active output buffer.
-Yamagi still runs the frame, but `overlay_context_end_frame()` has no overlay buffer to submit.
+Instead, one **serialized SDK worker** owns all runtime axoverlay2 operations:
 
-If a buffer is returned, the matching `render_surface` is found or created.
-The buffer and surface are stored as the current output state.
-The private Quake framebuffer is then bound. Its viewport, the area used for drawing, is set to the Quake render size.
+- concrete overlay creation and removal
+- buffer acquisition
+- buffer metadata queries
+- buffer submission
+
+The worker processes only one SDK call at a time.
+This avoids races in shared library state and prevents one operation from consuming another operation's reply.
+
+A blocking acquisition can still delay later axoverlay2 work queued behind it; the API provides no readiness or
+caller-selected nonblocking mode to avoid that safely in one process.
+Because submission uses the same serialized worker, this can also postpone presentation of already rendered frames
+for other streams until the blocking acquisition returns. Independent animation progress across mixed-frame-rate
+streams is therefore not guaranteed by this design.
+
+The important boundary is that this delay never blocks the Yamagi game/render thread.
+Quake continues running internally and skips streams which do not already have a ready buffer.
+
+Acquisition attempts use round-robin ordering so a stream which returns `AXO_ERR_WAIT` moves behind the other
+eligible streams rather than being selected repeatedly before they get a turn.
+
+`overlay_context_begin_frame()` first processes pending VDO events and wakes the SDK worker.
+It then synchronizes render-side buffer caches with the current concrete-overlay epochs and polls for buffers
+which the worker has already marked ready.
+
+A ready buffer is claimed only while its concrete overlay is not owned by an active SDK action and no recreation
+has been requested. Once removal or recreation has been selected, the old buffer cannot cross into EGL import.
+
+For each accepted ready buffer, `create_render_surface()` imports the published DMA-BUF metadata into EGL on the render thread.
+No axoverlay2 call occurs during EGL import.
+
+If DMA-BUF import fails, the acquired buffer is never submitted.
+Submitting normally presents a buffer, so an undrawn buffer must not be returned through `axo_submit_buffer()`.
+The buffer is instead marked for discard, the concrete overlay is removed by the SDK worker, and creation is retried.
+
+If at least one stream has a valid output buffer, the shared private Quake framebuffer is bound and Yamagi renders once.
+If no stream has a ready buffer for that frame, Yamagi continues running but there is nothing to copy.
 
 ### Completing the frame
 
-`overlay_context_end_frame()` first checks whether a current buffer and surface exist.
-If not, there is no output buffer to submit for that frame.
+`overlay_context_end_frame()` first checks whether any stream has an acquired buffer and imported surface.
+If none do, there is no output buffer to submit for that frame.
 
-When a buffer exists, the code binds:
+When one or more output buffers exist, the code binds the private Quake framebuffer as
+`GL_READ_FRAMEBUFFER` and visits each acquired stream buffer as `GL_DRAW_FRAMEBUFFER`.
 
-- the private Quake framebuffer as `GL_READ_FRAMEBUFFER`
-- the framebuffer backed by the axoverlay2 buffer as `GL_DRAW_FRAMEBUFFER`
-
-`glBlitFramebuffer()` copies the color image between the two GPU framebuffers.
-The destination Y coordinates are reversed, so the copy also flips the image vertically.
+`glBlitFramebuffer()` copies the same completed Quake image into every stream buffer.
+The destination coordinates also scale the image to that stream overlay's dimensions and reverse the Y axis.
 
 The code does not use `glReadPixels()` or a CPU-side copy for the completed frame.
 
@@ -345,10 +421,19 @@ It clears alpha to 1.0 and then restores normal color writes.
 ### Synchronization
 
 The overlay enables manual DMA synchronization with `axo_props_set_manual_dma_sync(props, true)`.
-This makes the application responsible for completing its GPU writes before returning the buffer.
+This makes the application responsible for completing its GPU writes before returning a buffer.
 
-Before the buffer is submitted, `glFinish()` waits for the GPU to complete its writes.
-The code then clears the current buffer state and calls `axo_submit_buffer()`.
+After all stream buffers have received the completed image, one `glFinish()` waits for all GPU writes.
+The render thread then changes those buffers from the rendering state to the submit state and wakes the SDK worker.
+
+Only the SDK worker calls `axo_submit_buffer()`.
+After a successful submission the buffer becomes free and that stream becomes eligible for another acquisition attempt.
+
+If submission reports that the stream disappeared, that result is applied only when its captured stream generation is
+still current. Other submission failures request recreation of that concrete overlay.
+
+Using one GPU synchronization point avoids waiting separately for every active stream, while serialized SDK submission
+keeps axoverlay2's process-wide state single-threaded.
 
 ## 8. Input architecture
 
@@ -518,7 +603,7 @@ It adds these command-line arguments before any user-supplied arguments:
 - `+set vid_fullscreen 0`
 - `+set r_msaa_samples 0`
 - `+set r_vsync 0`
-- `+map q2dm1`
+- `+newgame`
 
 It creates `localdata` inside the package directory and assigns that path to `HOME`.
 
@@ -540,8 +625,12 @@ See [Audio playback](BUILD.md#audio-playback) for output selection and permissio
 Here, ownership means responsibility for keeping a resource valid and releasing it when finished.
 
 - `gpu_context` owns the EGL display, OpenGL ES context, and 1x1 pbuffer.
-- `overlay_context` owns the VDO event stream and the resources associated with the active overlay.
-- `render_surface` owns the EGL and OpenGL objects created for one imported axoverlay2 buffer.
+- `overlay_context` owns the VDO event stream, the shared Quake render target, the persistent stream records, and one serialized axoverlay2 worker.
+- Each `overlay_stream` owns the lifecycle state for one VDO stream ID and the render-side cache for its current concrete overlay.
+- The serialized SDK worker is the only thread which performs runtime axoverlay2 create, remove, acquire, metadata, and submit operations.
+- The Yamagi render thread owns all EGL and OpenGL work and never waits for axoverlay2.
+- Stream generations make VDO lifecycle events authoritative over stale results from older SDK operations.
+- `render_surface` owns the EGL and OpenGL objects created for one imported DMA-BUF.
 - The WebSocket thread owns network servicing and produces decoded input events.
 - The input queue transfers events from the WebSocket thread to the Yamagi game thread.
 - The Yamagi game thread consumes ACAP input and runs the renderer calls that use the ACAP graphics path.
@@ -552,8 +641,10 @@ The renderer releases overlay graphics resources before destroying the EGL conte
 ## 11. Where to look when debugging
 
 - For EGL or OpenGL context setup, start with `src/gpu_context.c`.
-- For VDO stream discovery or overlay creation, start with `src/overlay.c`.
-- For buffer import, frame copy, alpha handling, or submission, start with `src/overlay.c`.
+- For VDO stream discovery, stream-generation handling, or overlay retries, start with `src/overlay.c`.
+- For SDK serialization or a stream delaying buffer acquisition, inspect `overlay_sdk_worker()` and `select_overlay_sdk_action_locked()`.
+- For acquisition-specific behavior, inspect `perform_overlay_acquire()`.
+- For buffer import, frame copy, alpha handling, or asynchronous submission, start with `src/overlay.c`.
 - For WebSocket reception, start with `src/input/websocket.c`.
 - For rejected input packets, start with `src/input/input_protocol.c`.
 - For queue ordering or overflow behavior, start with `src/input/input_queue.c` and `src/input/acap_input.c`.
@@ -571,12 +662,15 @@ For the graphics path:
 2. `src/gpu_context.c`
 3. `src/overlay.h`
 4. `overlay_context_init()`
-5. `create_overlay()`
-6. `create_render_target()`
-7. `overlay_context_begin_frame()`
-8. `create_render_surface()`
-9. `overlay_context_end_frame()`
-10. The graphics-related parts of `patches/yquake2-acap.patch`
+5. `overlay_context_process_events()` and `register_overlay_stream()`
+6. `overlay_sdk_worker()` and `select_overlay_sdk_action_locked()`
+7. `perform_overlay_create()`, `perform_overlay_acquire()`, and `perform_overlay_submit()`
+8. `sync_render_resources()`
+9. `create_render_target()`
+10. `overlay_context_begin_frame()`
+11. `create_render_surface()`
+12. `overlay_context_end_frame()`
+13. The graphics-related parts of `patches/yquake2-acap.patch`
 
 For the input path:
 

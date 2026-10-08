@@ -69,7 +69,7 @@ read -r -a ACAP_CFLAGS <<<"$(pkg-config --cflags $ACAP_PKGS)"
 "${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
   -c "$ROOT/src/gpu_context.c" -o "$ACAP_BUILD_DIR/gpu_context.o"
 
-"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
+"${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC -pthread "${ACAP_CFLAGS[@]}" -I"$ROOT/src" \
   -c "$ROOT/src/overlay.c" -o "$ACAP_BUILD_DIR/overlay.o"
 
 "${CC_CMD[@]}" "${SDK_CFLAGS[@]}" "${ACAP_BUILD_CFLAGS[@]}" -Wall -fPIC -pthread \
@@ -93,7 +93,7 @@ read -r -a ACAP_CFLAGS <<<"$(pkg-config --cflags $ACAP_PKGS)"
   -c "$ROOT/src/input/websocket.c" -o "$ACAP_BUILD_DIR/websocket.o"
 
 ACAP_GLES3_OBJS="$ACAP_BUILD_DIR/gpu_context.o $ACAP_BUILD_DIR/overlay.o"
-ACAP_GLES3_LDLIBS="$(pkg-config --libs $ACAP_PKGS)"
+ACAP_GLES3_LDLIBS="$(pkg-config --libs $ACAP_PKGS) -pthread"
 ACAP_CLIENT_OBJS="$ACAP_BUILD_DIR/acap_input.o $ACAP_BUILD_DIR/input_queue.o \
 $ACAP_BUILD_DIR/input_protocol.o $ACAP_BUILD_DIR/yamagi_input.o $ACAP_BUILD_DIR/websocket.o"
 
