@@ -175,180 +175,126 @@ It then terminates the EGL display connection.
 
 ## 4. Video stream and overlay setup
 
-`src/overlay.c` connects the completed Quake frame to a camera video stream.
+The renderer listens to VDO stream lifecycle events through stream 0 with the `overlay` filter.
 
-The code uses three systems with separate roles:
+Unlike the original single-stream implementation, the context keeps one small `overlay_stream` record for every
+active VDO stream. Each record owns:
 
-- **VDO**, the Axis video API, reports when video streams appear or close.
-- **[axoverlay2][axoverlay2-api]**, the Axis overlay API, provides image buffers
-  and places their contents over a video stream.
-- **EGL and OpenGL ES** let the GPU access and write those buffers.
+- the VDO stream ID and reported dimensions,
+- one concrete Axoverlay2 overlay,
+- the detailed Axoverlay2 format,
+- the EGL/OpenGL imports for that overlay's rotating buffers,
+- retry timing for stream-local creation failures.
 
-`overlay_context_init()` starts axoverlay2.
-It opens VDO stream 0 to receive overlay-related stream events, not to display the game on stream 0.
-The renderer checks for existing, created, and closed streams during setup and at the start of each frame.
+The records are intentionally synchronous. There is no overlay worker thread and no asynchronous SDK result which can
+outlive the VDO event that caused it.
 
-When an existing or newly created stream is reported, the code reads its stream ID, width, and height.
-It then calls `create_overlay()`.
+### Stream lifecycle
 
-If the active stream closes, `remove_overlay()` releases the resources associated with that overlay.
+`EXISTING` and `CREATED` register or refresh the matching stream record.
+If an already known stream reports different dimensions, only that stream's concrete overlay is recreated.
 
-The code keeps at most one active overlay.
-The first stream for which `create_overlay()` succeeds gets the overlay.
-Further stream events do not create another overlay while it remains active.
-The code does not keep a list of other streams to switch to when that stream closes.
+`CLOSED` removes only the matching record and concrete overlay. Other streams remain active.
 
-### Render size
+Temporary creation failures are retried once per second from the normal render loop. A failure on one stream does not
+tear down the other stream overlays.
 
-`create_overlay()` chooses the size of the image that Quake renders.
+### Shared Quake render target
 
-If both stream dimensions are divisible by two, Quake renders at half width and half height.
-The overlay is then configured with 2x upscaling.
+Quake still renders exactly once.
 
-A 1920x1080 video stream therefore uses a 960x540 Quake render target.
+The first successfully created concrete overlay selects the private Quake framebuffer size. That shared render target
+remains stable while any VDO stream record exists. If another stream uses a different overlay size, the completed
+Quake image is scaled by the final GPU blit into that stream's output buffer.
 
-If either stream dimension is not divisible by two, Quake renders at the full stream size.
-
-`overlay_context.width` and `overlay_context.height` store the size used by Quake.
-`full_width` and `full_height` store the allocated axoverlay2 buffer size.
-The code first asks axoverlay2 for the required size, then rounds both dimensions up to multiples of 16.
-These extra pixels satisfy buffer layout requirements.
-They do not increase the Quake render size.
+When the final VDO stream closes, the shared render target is released. A later stream may then choose a new render
+size.
 
 ## 5. Private Quake framebuffer
 
-`create_render_target()` creates the framebuffer that Yamagi uses as its final ACAP render target.
+Quake renders its final image into one application-owned OpenGL framebuffer.
 
-It creates:
+This framebuffer is independent of Axoverlay2 buffer availability. A frame can therefore complete normally even when
+the selected video stream has no output buffer ready.
 
-- an RGBA8 texture storing red, green, blue, and alpha, with 8 bits per component
-- a renderbuffer storing depth for visibility tests and stencil values for masking drawing
-- an OpenGL framebuffer attaching those images as its drawing destinations
+No CPU readback is used. When an Axoverlay2 output buffer is available, the completed image stays on the GPU and is
+copied with `glBlitFramebuffer()`.
 
-During an active output frame, Yamagi places its final image in this private framebuffer.
-It can use temporary framebuffers for intermediate rendering.
+## 6. Importing Axoverlay2 buffers
 
-This gives Yamagi one stable final render target while axoverlay2 manages its own set of output buffers.
+Axoverlay2 rotates through several output buffers for each concrete overlay.
 
-The completed color image is then copied into the current axoverlay2 buffer on the GPU.
-The [frame lifecycle](#7-frame-lifecycle) below shows the complete sequence.
+The first time a buffer ID is returned for a stream, its DMA-BUF is imported into EGL and attached to an OpenGL
+texture and framebuffer. The resulting `render_surface` is cached on that stream record and reused when the same
+buffer returns later.
 
-## 6. Importing axoverlay2 buffers
+Caches are per stream, so identical buffer IDs from two different concrete overlays cannot be confused.
 
-`overlay_context_begin_frame()` requests an output buffer with `axo_get_buffer()`.
-
-Each axoverlay2 buffer has a stable buffer ID.
-`overlay.c` uses that ID to check whether the buffer has already been imported.
-
-A new buffer is imported by `create_render_surface()`.
-
-```mermaid
-flowchart TD
-    Buffer[axoverlay2 buffer]
-    FD[DMA-BUF file descriptor]
-    Image[EGL image]
-    Texture[OpenGL texture]
-    Framebuffer[OpenGL framebuffer]
-
-    Buffer -->|axo_buffer_get_dma_buf_fd| FD
-    FD -->|eglCreateImageKHR| Image
-    Image -->|glEGLImageTargetTexture2DOES| Texture
-    Texture --> Framebuffer
-```
-
-DMA-BUF is a Linux mechanism for sharing a memory buffer.
-Its file descriptor lets EGL refer to the image memory provided by axoverlay2.
-`eglCreateImageKHR()` creates an EGL image referring to that memory.
-
-The import includes:
-
-- the allocated width and height
-- the DRM FourCC, a code identifying the pixel format
-- the DMA-BUF file descriptor
-- the plane offset, where the image data begins in the buffer
-- the row pitch, the byte distance between rows in the logical image layout
-- the DRM modifier, which describes details such as tiling or compression
-
-`glEGLImageTargetTexture2DOES()` binds the imported EGL image to an OpenGL texture.
-That texture is attached to an OpenGL framebuffer.
-
-A `render_surface` stores these EGL and OpenGL objects, the buffer ID, and a depth and stencil renderbuffer.
-The texture and EGL image refer to the same color buffer.
-Importing it does not copy the completed game image.
-
-Imported surfaces are stored in a linked list.
-When axoverlay2 returns the same buffer again, the existing `render_surface` is reused.
+When a concrete overlay is removed or recreated, all imported surfaces belonging to that stream are destroyed first.
 
 ## 7. Frame lifecycle
 
-A frame with an available overlay buffer follows this path:
+The renderer deliberately keeps the same synchronous Axoverlay2 execution model as `main`.
 
-```mermaid
-flowchart TD
-    Begin[Begin frame]
-    Events[Process VDO events]
-    Acquire[axo_get_buffer]
-    Known{Buffer already imported}
-    Reuse[Reuse render surface]
-    Import[Import buffer]
-    Bind[Bind private Quake framebuffer]
-    Render[Yamagi renders frame]
-    Blit[Copy into axoverlay2 buffer]
-    Alpha[Set final alpha to 1.0]
-    Finish[glFinish]
-    Submit[axo_submit_buffer]
-    Video[Camera video stream]
-
-    Begin --> Events --> Acquire --> Known
-    Known -->|Yes| Reuse --> Bind
-    Known -->|No| Import --> Bind
-    Bind --> Render --> Blit --> Alpha --> Finish --> Submit --> Video
-```
+There are no Axoverlay2 worker threads and no concurrent SDK calls.
 
 ### Beginning the frame
 
-`overlay_context_begin_frame()` first processes pending VDO events.
-If an overlay exists, it asks axoverlay2 for the next available buffer.
+`overlay_context_begin_frame()`:
 
-If there is no overlay, or buffer acquisition reports `AXO_ERR_WAIT` or `AXO_ERR_NO_STREAM`,
-`overlay_context_begin_frame()` returns true with no active output buffer.
-Yamagi still runs the frame, but `overlay_context_end_frame()` has no overlay buffer to submit.
+1. drains pending VDO events,
+2. retries any stream-local overlay creation whose retry delay expired,
+3. selects one active stream round-robin,
+4. performs at most one `axo_get_buffer()` call,
+5. binds the shared Quake framebuffer.
 
-If a buffer is returned, the matching `render_surface` is found or created.
-The buffer and surface are stored as the current output state.
-The private Quake framebuffer is then bound. Its viewport, the area used for drawing, is set to the Quake render size.
+Only one potentially blocking acquisition is attempted per game frame regardless of the number of active streams.
+This is the central CPU and complexity constraint of this design.
+
+With two active streams the acquisition order is approximately:
+
+```text
+frame 1 -> stream A
+frame 2 -> stream B
+frame 3 -> stream A
+frame 4 -> stream B
+```
+
+A stream returning `AXO_ERR_WAIT` simply receives no presentation for that turn. The next game frame advances to the
+next stream instead of polling the same stream in a background loop.
+
+`AXO_ERR_NO_STREAM` is treated as the documented disconnect race: the acquisition is skipped and the stream record
+is left intact until the corresponding VDO `CLOSED` event removes it.
 
 ### Completing the frame
 
-`overlay_context_end_frame()` first checks whether a current buffer and surface exist.
-If not, there is no output buffer to submit for that frame.
+Quake renders once into the shared framebuffer.
 
-When a buffer exists, the code binds:
+If begin-frame acquired an output buffer, `overlay_context_end_frame()`:
 
-- the private Quake framebuffer as `GL_READ_FRAMEBUFFER`
-- the framebuffer backed by the axoverlay2 buffer as `GL_DRAW_FRAMEBUFFER`
+1. blits the completed Quake image into that stream's imported framebuffer,
+2. forces the output alpha channel to 1.0,
+3. calls `glFinish()` because manual DMA synchronization is enabled,
+4. submits that one buffer with `axo_submit_buffer()`.
 
-`glBlitFramebuffer()` copies the color image between the two GPU framebuffers.
-The destination Y coordinates are reversed, so the copy also flips the image vertically.
+If no buffer was acquired, the Quake frame still completes but there is nothing to submit.
 
-The code does not use `glReadPixels()` or a CPU-side copy for the completed frame.
+A failed submission is isolated to that stream. Its concrete overlay is removed and recreated later instead of
+terminating the game or disturbing other streams.
 
-### Final alpha
+### Performance tradeoff
 
-Alpha controls how much of the underlying video shows through: 0.0 is transparent and 1.0 is opaque.
-Quake's render target can contain non-opaque alpha values after normal rendering.
-The final axoverlay2 image is forced opaque so the camera video does not show through the game image.
+This design intentionally favors a small synchronous implementation over maximum per-stream presentation frequency.
 
-After the framebuffer copy, the code enables writes only to the alpha channel.
-It clears alpha to 1.0 and then restores normal color writes.
+Supporting N streams does not perform N blocking acquisitions per Quake frame and does not create background polling
+threads. Instead, the streams share output opportunities round-robin.
 
-### Synchronization
+That should keep CPU behavior much closer to the original single-stream implementation while fixing the lifecycle bug
+where only one stream could own Quake.
 
-The overlay enables manual DMA synchronization with `axo_props_set_manual_dma_sync(props, true)`.
-This makes the application responsible for completing its GPU writes before returning the buffer.
-
-Before the buffer is submitted, `glFinish()` waits for the GPU to complete its writes.
-The code then clears the current buffer state and calls `axo_submit_buffer()`.
+The tradeoff is that with multiple active streams each stream receives a fraction of the available presentation
+opportunities. This is preferable to adding an autonomous SDK worker until real device measurements demonstrate that
+the synchronous Axoverlay2 wait time is unacceptable.
 
 ## 8. Input architecture
 
