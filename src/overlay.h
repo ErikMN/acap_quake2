@@ -35,6 +35,11 @@ struct overlay_context {
   void *event_stream;
 
   /*
+   * File descriptor that signals pending VDO stream events.
+   */
+  int event_fd;
+
+  /*
    * Active video streams.
    */
   struct overlay_stream *streams;

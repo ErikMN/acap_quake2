@@ -12,6 +12,7 @@
 
 #include "gpu_context.h"
 
+#include <poll.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <syslog.h>
@@ -70,6 +71,7 @@ struct render_surface {
 };
 
 #define OVERLAY_CREATE_RETRY_US 1000000
+#define NO_OUTPUT_WAIT_MS 33
 
 /*
  * State for one active video stream.
@@ -136,6 +138,7 @@ overlay_context_init(struct overlay_context *overlay)
    * This makes the normal cleanup path safe even if initialization fails halfway through.
    */
   overlay->event_stream = NULL;
+  overlay->event_fd = -1;
   overlay->streams = NULL;
   overlay->current_stream = NULL;
   overlay->current_surface = NULL;
@@ -178,6 +181,13 @@ overlay_context_init(struct overlay_context *overlay)
 
   if (!vdo_stream_attach(event_stream, filter, &error)) {
     syslog(LOG_ERR, "Failed to attach VDO stream filter: %s", error ? error->message : "unknown error");
+    g_clear_error(&error);
+    goto fail;
+  }
+
+  overlay->event_fd = vdo_stream_get_event_fd(event_stream, &error);
+  if (overlay->event_fd < 0) {
+    syslog(LOG_ERR, "Failed to get VDO event fd: %s", error ? error->message : "unknown error");
     g_clear_error(&error);
     goto fail;
   }
@@ -225,6 +235,7 @@ overlay_context_destroy(struct overlay_context *overlay)
     g_object_unref(overlay->event_stream);
     overlay->event_stream = NULL;
   }
+  overlay->event_fd = -1;
 
   if (overlay->axo_started) {
     axo_stop(NULL);
@@ -349,9 +360,16 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
   }
 
   /*
-   * The shared Quake framebuffer exists independently of output buffer readiness.
+   * Avoid spinning at full speed when there is no output to render.
+   * Waiting on the VDO event fd wakes immediately when a stream appears.
    */
   if (!overlay->render_framebuffer) {
+    struct pollfd event_poll = {
+      .fd = overlay->event_fd,
+      .events = POLLIN,
+    };
+
+    (void)poll(&event_poll, 1, NO_OUTPUT_WAIT_MS);
     return true;
   }
 
