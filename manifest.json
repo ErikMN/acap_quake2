@@ -34,7 +34,7 @@
       "reverseProxy": [
         {
           "apiPath": "input",
-          "target": "ws://127.0.0.1:9000",
+          "target": "ws://127.0.0.1:9001",
           "access": "admin"
         }
       ],

@@ -12,7 +12,7 @@
 
 #include <libwebsockets.h>
 
-#define ACAP_WEBSOCKET_PORT 9000
+#define ACAP_WEBSOCKET_PORT 9001
 
 struct websocket_server_state {
   pthread_t thread;

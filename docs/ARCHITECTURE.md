@@ -485,7 +485,7 @@ The browser sends it when pointer lock is lost after capture, the window loses f
 
 The Axis web server authenticates the browser and forwards its control connection to the app.
 This forwarding is the reverse proxy: the browser uses the device web address while the app listens locally.
-[`manifest.json`](../manifest.json) maps the `input` path to `ws://127.0.0.1:9000` and requires `admin` access.
+[`manifest.json`](../manifest.json) maps the `input` path to `ws://127.0.0.1:9001` and requires `admin` access.
 [`websocket.c`](../src/input/websocket.c) runs libwebsockets on its own thread and listens on loopback,
 which is reachable only from within the device.
 
