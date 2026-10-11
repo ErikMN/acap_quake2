@@ -1,13 +1,12 @@
 /*
- * Connects Quake's finished frames to the video stream through axoverlay2.
+ * Sends Quake's rendered image to the active video streams.
  *
- * During an active output frame, Quake renders its final image into an OpenGL framebuffer owned by the application.
- * This file then copies that image into the current buffer provided by axoverlay2.
+ * Quake renders once into a shared OpenGL framebuffer.
+ * Each video stream has its own Axoverlay2 overlay and output buffers.
+ * At most one stream receives a new image during each Quake frame.
  *
- * axoverlay2 provides the final overlay buffers and cycles between several of them.
- *
- * Each buffer is imported into OpenGL the first time it is seen.
- * The GPU can then write to it directly without reading the completed frame back through the CPU.
+ * An output buffer is imported into OpenGL the first time it is seen.
+ * The imported OpenGL objects are then reused when that buffer returns.
  */
 #include "overlay.h"
 
@@ -27,17 +26,17 @@
 #include <axoverlay2.h>
 
 /*
- * VDO is used to discover video streams and follow changes when streams appear or disappear while Quake is running.
+ * VDO reports when video streams appear and disappear.
  */
 #include <glib-object.h>
 #include <vdo-error.h>
 #include <vdo-stream.h>
 
 /*
- * axoverlay2 cycles through several overlay buffers instead of using one permanent image.
+ * OpenGL objects created for one Axoverlay2 output buffer.
  *
- * The first time a buffer is received from axoverlay2, it is imported into EGL.
- * This structure keeps the associated OpenGL objects so the same buffer can be reused when it returns later.
+ * Axoverlay2 reuses a small set of buffers.
+ * Keeping these objects avoids importing the same buffer again every frame.
  */
 struct render_surface {
   /*
@@ -53,43 +52,73 @@ struct render_surface {
   EGLDisplay display;
 
   /*
-   * EGL representation of the DMA-BUF backing the axoverlay2 buffer.
-   * This connects the axoverlay2 buffer to the graphics system.
+   * EGL image created from the shared Axoverlay2 buffer.
    */
   EGLImageKHR image;
 
   /*
-   * OpenGL texture backed by the EGL image.
-   * Writing to this texture therefore writes into the axoverlay2 buffer.
+   * OpenGL texture that refers to the EGL image.
    */
   GLuint texture;
 
   /*
-   * OpenGL framebuffer with the imported axoverlay2-backed texture attached as its color image.
-   * This lets normal OpenGL commands write into the axoverlay2 buffer.
+   * Framebuffer used as the destination when the Quake image is copied.
    */
   GLuint framebuffer;
-
-  GLuint depth_stencil;
 
   struct render_surface *next;
 };
 
-static void remove_overlay(struct overlay_context *overlay);
-static void destroy_render_surfaces(struct overlay_context *overlay);
+#define OVERLAY_CREATE_RETRY_US 1000000
 
-static bool
-create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned stream_width, unsigned stream_height);
+/*
+ * State for one active video stream.
+ *
+ * The stream owns one Axoverlay2 overlay and the OpenGL objects created for that overlay's output buffers.
+ */
+struct overlay_stream {
+  unsigned stream_id;
+  unsigned stream_width;
+  unsigned stream_height;
+
+  int overlay_id;
+  axo_detailed_format *format;
+  struct render_surface *surfaces;
+
+  unsigned width;
+  unsigned height;
+  unsigned full_width;
+  unsigned full_height;
+
+  unsigned frame_count;
+  int64_t retry_at_us;
+
+  struct overlay_stream *next;
+};
+
+static struct overlay_stream *find_overlay_stream(struct overlay_context *overlay, unsigned stream_id);
+static bool register_overlay_stream(struct overlay_context *overlay,
+                                    unsigned stream_id,
+                                    unsigned stream_width,
+                                    unsigned stream_height);
+static bool remove_overlay_stream(struct overlay_context *overlay, unsigned stream_id);
+static void remove_all_overlay_streams(struct overlay_context *overlay);
+
+static bool create_overlay(struct overlay_context *overlay, struct overlay_stream *stream);
+static bool destroy_stream_overlay(struct overlay_stream *stream);
+static bool retry_pending_overlays(struct overlay_context *overlay);
+static struct overlay_stream *select_output_stream(struct overlay_context *overlay);
 
 static bool create_render_target(struct overlay_context *overlay);
 static void destroy_render_target(struct overlay_context *overlay);
 
-static struct render_surface *find_render_surface(struct overlay_context *overlay, unsigned long buffer_id);
+static struct render_surface *find_render_surface(struct overlay_stream *stream, unsigned long buffer_id);
 
 static struct render_surface *
-create_render_surface(struct overlay_context *overlay, const struct gpu_context *gpu, axo_buffer *buffer);
+create_render_surface(struct overlay_stream *stream, const struct gpu_context *gpu, axo_buffer *buffer);
 
 static void destroy_render_surface(struct render_surface *surface);
+static void destroy_render_surfaces(struct overlay_stream *stream);
 
 /*
  * Start axoverlay2 and subscribe to VDO events used to discover video streams.
@@ -107,21 +136,16 @@ overlay_context_init(struct overlay_context *overlay)
    * This makes the normal cleanup path safe even if initialization fails halfway through.
    */
   overlay->event_stream = NULL;
-  overlay->format = NULL;
-  overlay->surfaces = NULL;
+  overlay->streams = NULL;
+  overlay->current_stream = NULL;
   overlay->current_surface = NULL;
   overlay->current_buffer = NULL;
-  overlay->event_fd = -1;
-  overlay->overlay_id = -1;
-  overlay->stream_id = 0;
   overlay->width = 0;
   overlay->height = 0;
-  overlay->full_width = 0;
-  overlay->full_height = 0;
   overlay->render_texture = 0;
   overlay->render_framebuffer = 0;
   overlay->render_depth_stencil = 0;
-  overlay->frame_count = 0;
+  overlay->next_stream_index = 0;
   overlay->axo_started = false;
 
   if (!axo_start(NULL, &axo_error)) {
@@ -158,22 +182,9 @@ overlay_context_init(struct overlay_context *overlay)
     goto fail;
   }
 
-  /*
-   * VDO exposes its events through a file descriptor.
-   * The current renderer does not wait on this descriptor.
-   * It checks for pending VDO events at the beginning of each frame.
-   */
-  overlay->event_fd = vdo_stream_get_event_fd(event_stream, &error);
-  if (overlay->event_fd < 0) {
-    syslog(LOG_ERR, "Failed to get VDO event fd: %s", error ? error->message : "unknown error");
-    g_clear_error(&error);
-    goto fail;
-  }
-
   g_object_unref(filter);
 
   syslog(LOG_INFO, "axoverlay2 initialized");
-  syslog(LOG_INFO, "VDO event fd: %d", overlay->event_fd);
 
   return true;
 
@@ -199,14 +210,21 @@ fail:
 void
 overlay_context_destroy(struct overlay_context *overlay)
 {
-  remove_overlay(overlay);
+  overlay->current_stream = NULL;
+  overlay->current_surface = NULL;
+  overlay->current_buffer = NULL;
+
+  remove_all_overlay_streams(overlay);
+  destroy_render_target(overlay);
+
+  overlay->width = 0;
+  overlay->height = 0;
+  overlay->next_stream_index = 0;
 
   if (overlay->event_stream) {
     g_object_unref(overlay->event_stream);
     overlay->event_stream = NULL;
   }
-
-  overlay->event_fd = -1;
 
   if (overlay->axo_started) {
     axo_stop(NULL);
@@ -215,45 +233,27 @@ overlay_context_destroy(struct overlay_context *overlay)
 }
 
 /*
- * Return the VDO event descriptor, or -1 when no descriptor is available.
- * The current Yamagi integration does not use this accessor.
- */
-int
-overlay_context_get_event_fd(const struct overlay_context *overlay)
-{
-  return overlay->event_fd;
-}
-
-/*
- * Process pending VDO events to create an overlay for an available stream or remove it when that stream closes.
+ * Process all pending video stream events.
  */
 bool
 overlay_context_process_events(struct overlay_context *overlay)
 {
-  /*
-   * Video streams can appear and disappear while the application is running.
-   * Follow those changes so an overlay can be created for an available stream and removed when that stream closes.
-   */
   VdoStream *event_stream = overlay->event_stream;
 
   /*
-   * Process every event that is currently waiting.
-   * VDO_ERROR_NO_EVENT is used to tell us that the queue is empty.
+   * Drain the queue. VDO_ERROR_NO_EVENT means there are no more events.
    */
   for (;;) {
     GError *error = NULL;
     VdoMap *event = vdo_stream_get_event(event_stream, &error);
     if (!event) {
-      /*
-       * Having no more events is normal and means all pending work has been handled.
-       */
       if (g_error_matches(error, VDO_ERROR, VDO_ERROR_NO_EVENT)) {
         g_clear_error(&error);
         return true;
       }
+
       syslog(LOG_ERR, "Failed to get VDO event: %s", error ? error->message : "unknown error");
       g_clear_error(&error);
-
       return false;
     }
 
@@ -261,14 +261,21 @@ overlay_context_process_events(struct overlay_context *overlay)
     unsigned stream_id = vdo_map_get_uint32(event, "id", 0);
 
     /*
-     * Existing means the stream was already present when we started listening.
-     * Created means the stream appeared while the application was running.
-     *
-     * Both cases require the same setup.
+     * EXISTING and CREATED both mean that the stream should have an overlay.
      */
     if (event_type == VDO_STREAM_EVENT_EXISTING || event_type == VDO_STREAM_EVENT_CREATED) {
       VdoStream *stream = vdo_stream_get(stream_id, &error);
       if (!stream) {
+        /*
+         * A stream can disappear after its event was queued but before we look it up.
+         * Treat that as a local stream race rather than a renderer failure.
+         */
+        if (error && g_error_matches(error, VDO_ERROR, VDO_ERROR_NOT_FOUND)) {
+          g_clear_error(&error);
+          g_object_unref(event);
+          continue;
+        }
+
         syslog(LOG_ERR, "Failed to get VDO stream %u: %s", stream_id, error ? error->message : "unknown error");
         g_clear_error(&error);
         g_object_unref(event);
@@ -276,212 +283,251 @@ overlay_context_process_events(struct overlay_context *overlay)
       }
 
       VdoMap *info = vdo_stream_get_info(stream, NULL);
-      if (info) {
-        unsigned width = vdo_map_get_uint32(info, "width", 0);
-        unsigned height = vdo_map_get_uint32(info, "height", 0);
-
-        syslog(LOG_INFO, "VDO stream %u available: %ux%u", stream_id, width, height);
-        if (!create_overlay(overlay, stream_id, width, height)) {
-          g_object_unref(info);
-          g_object_unref(stream);
-          g_object_unref(event);
-          return false;
-        }
-
-        g_object_unref(info);
+      if (!info) {
+        syslog(LOG_ERR, "Failed to get VDO stream %u information", stream_id);
+        g_object_unref(stream);
+        g_object_unref(event);
+        continue;
       }
 
+      unsigned width = vdo_map_get_uint32(info, "width", 0);
+      unsigned height = vdo_map_get_uint32(info, "height", 0);
+
+      g_object_unref(info);
       g_object_unref(stream);
-    } else if (event_type == VDO_STREAM_EVENT_CLOSED) {
+      g_object_unref(event);
+
+      if (!width || !height) {
+        syslog(LOG_ERR, "VDO stream %u has invalid size %ux%u", stream_id, width, height);
+        continue;
+      }
+
+      if (!register_overlay_stream(overlay, stream_id, width, height)) {
+        return false;
+      }
+
+      continue;
+    }
+
+    if (event_type == VDO_STREAM_EVENT_CLOSED) {
       syslog(LOG_INFO, "VDO stream %u closed", stream_id);
-      /*
-       * Only remove our overlay if the stream that disappeared is the one we are currently attached to.
-       */
-      if (overlay->stream_id == stream_id) {
-        remove_overlay(overlay);
+
+      if (!remove_overlay_stream(overlay, stream_id)) {
+        g_object_unref(event);
+        return false;
       }
     }
+
     g_object_unref(event);
   }
 }
 
 /*
- * Process stream changes, acquire an output buffer and bind the private Quake framebuffer when one is available.
- * Returns true even when no output buffer is available for this frame.
+ * Prepare one Quake frame.
+ *
+ * Stream events are handled first.
+ * Then one active stream is selected for an output buffer.
+ * Quake can still render when no output buffer is ready.
  */
 bool
 overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_context *gpu)
 {
-  /*
-   * Handle stream changes before starting another Quake frame.
-   */
   if (!overlay_context_process_events(overlay)) {
     return false;
   }
 
+  if (!retry_pending_overlays(overlay)) {
+    return false;
+  }
+
   /*
-   * A current buffer means the previous frame was never submitted.
-   * Starting another frame in that state would lose track of which axoverlay2 buffer is being written.
+   * A previous frame must be finished before another one starts.
    */
-  if (overlay->current_buffer) {
+  if (overlay->current_buffer || overlay->current_stream || overlay->current_surface) {
     syslog(LOG_ERR, "Overlay frame already active");
     return false;
   }
 
   /*
-   * There may temporarily be no video stream and therefore no overlay.
-   * That is not treated as an application error.
+   * The shared Quake framebuffer exists independently of output buffer readiness.
    */
-  if (overlay->overlay_id < 0) {
+  if (!overlay->render_framebuffer) {
     return true;
   }
 
-  /*
-   * Ask axoverlay2 for the next overlay buffer that is free to use.
-   *
-   * axoverlay2 manages several buffers for the overlay and cycles between them.
-   * The buffer returned here can therefore change from frame to frame.
-   */
-  axo_err *error = NULL;
-  axo_buffer *buffer = axo_get_buffer(overlay->overlay_id, NULL, &error);
-  if (!buffer) {
+  struct overlay_stream *stream = select_output_stream(overlay);
+  if (stream) {
+    axo_err *error = NULL;
     /*
-     * WAIT means no overlay buffer is ready yet.
-     * NO_STREAM means the video stream disappeared before the event was processed.
-     *
-     * Neither condition means the application itself is broken.
-     * Quake can continue rendering, but there is no overlay buffer to submit for this frame.
+     * Ask only the selected stream for a buffer.
+     * The selected stream changes each frame, so there is at most one blocking
+     * Axoverlay2 call per Quake frame.
      */
-    if (error && (axo_err_get_code(error) == AXO_ERR_WAIT || axo_err_get_code(error) == AXO_ERR_NO_STREAM)) {
-      axo_err_clear(&error);
-      return true;
-    }
+    axo_buffer *buffer = axo_get_buffer(stream->overlay_id, NULL, &error);
+    if (!buffer) {
+      if (error && axo_err_get_code(error) == AXO_ERR_WAIT) {
+        /*
+         * No buffer is ready yet. Quake can still render this frame.
+         */
+        axo_err_clear(&error);
+      } else if (error && axo_err_get_code(error) == AXO_ERR_NO_STREAM) {
+        /*
+         * The stream closed before its VDO close event arrived.
+         * Keep the record until that event is processed.
+         */
+        axo_err_clear(&error);
+      } else {
+        syslog(LOG_ERR,
+               "Failed to get overlay buffer for stream %u: %s",
+               stream->stream_id,
+               error ? axo_err_get_message(error) : "unknown error");
+        axo_err_clear(&error);
+        return false;
+      }
+    } else {
+      unsigned long buffer_id = axo_buffer_get_id(buffer);
+      /*
+       * Reuse the OpenGL objects if this buffer was imported earlier.
+       */
+      struct render_surface *surface = find_render_surface(stream, buffer_id);
+      if (!surface) {
+        /*
+         * Import a new buffer so OpenGL can write to it.
+         */
+        surface = create_render_surface(stream, gpu, buffer);
+        if (!surface) {
+          /*
+           * Do not submit a buffer that was never rendered.
+           * Removing the stream overlay discards that buffer before a later retry creates new ones.
+           */
+          syslog(LOG_ERR,
+                 "Failed to import overlay buffer %lu for stream %u; recreating the overlay",
+                 buffer_id,
+                 stream->stream_id);
+          if (!destroy_stream_overlay(stream)) {
+            return false;
+          }
 
-    syslog(LOG_ERR, "Failed to get overlay buffer: %s", error ? axo_err_get_message(error) : "unknown error");
-    axo_err_clear(&error);
-    return false;
+          stream->retry_at_us = g_get_monotonic_time() + OVERLAY_CREATE_RETRY_US;
+        } else {
+          surface->next = stream->surfaces;
+          stream->surfaces = surface;
+          syslog(LOG_INFO, "Imported overlay buffer %lu for stream %u", buffer_id, stream->stream_id);
+        }
+      }
+
+      if (surface) {
+        /*
+         * Keep the stream, buffer and imported surface together until end_frame().
+         */
+        overlay->current_stream = stream;
+        overlay->current_buffer = buffer;
+        overlay->current_surface = surface;
+      }
+    }
   }
 
-  unsigned long buffer_id = axo_buffer_get_id(buffer);
-
   /*
-   * Reuse the EGL and OpenGL objects if this axoverlay2 buffer was already imported during an earlier frame.
-   */
-  struct render_surface *surface = find_render_surface(overlay, buffer_id);
-  if (!surface) {
-    /*
-     * This is the first time this axoverlay2 buffer has been seen.
-     * Import it into EGL so the GPU can write into it.
-     */
-    surface = create_render_surface(overlay, gpu, buffer);
-    if (!surface) {
-      return false;
-    }
-
-    surface->next = overlay->surfaces;
-    overlay->surfaces = surface;
-    syslog(LOG_INFO, "Imported overlay buffer %lu", buffer_id);
-  }
-
-  /*
-   * Remember which axoverlay2 buffer belongs to the frame currently being rendered.
-   * overlay_context_end_frame() will submit this same buffer back to axoverlay2.
-   */
-  overlay->current_buffer = buffer;
-  overlay->current_surface = surface;
-
-  /*
-   * Quake draws into one stable image owned by the application.
-   *
-   * This keeps the game renderer independent of axoverlay2's rotating output buffers.
-   * Quake therefore sees the same framebuffer every frame.
+   * Quake always renders into the same shared framebuffer.
    */
   glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
-
   glViewport(0, 0, (GLsizei)overlay->width, (GLsizei)overlay->height);
 
   return true;
 }
 
 /*
- * Bind the private Quake framebuffer for an active output frame, or framebuffer 0 when no output buffer is active.
+ * Bind Quake's shared output framebuffer.
  */
 void
 overlay_context_bind_frame(struct overlay_context *overlay)
 {
   /*
-   * Yamagi sometimes needs to return to its final output framebuffer after using a temporary framebuffer.
-   *
-   * On a desktop this would normally be framebuffer 0.
-   * In this port the real game output is our private framebuffer instead.
+   * Yamagi calls this after using temporary framebuffers.
+   * The ACAP build returns to the shared Quake framebuffer instead of framebuffer 0.
    */
-  if (overlay->current_surface) {
+  if (overlay->render_framebuffer) {
     glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
   } else {
-    /*
-     * When no axoverlay2 output buffer is active, fall back to the normal OpenGL framebuffer.
-     */
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 }
 
 /*
- * Copy the completed Quake image into the output buffer and make it opaque.
- * Wait for GPU writes to finish, then submit the buffer to axoverlay2.
+ * Copy the completed Quake image to the selected stream and submit it.
  */
 bool
 overlay_context_end_frame(struct overlay_context *overlay)
 {
+  struct overlay_stream *stream = overlay->current_stream;
   axo_buffer *buffer = overlay->current_buffer;
   struct render_surface *surface = overlay->current_surface;
 
   /*
-   * A missing buffer means no axoverlay2 buffer was available when rendering began.
-   * There is therefore nothing to submit.
+   * No selected buffer means there is nothing to submit for this frame.
    */
-  if (!buffer || !surface) {
+  if (!stream || !buffer || !surface) {
+    overlay->current_stream = NULL;
+    overlay->current_buffer = NULL;
+    overlay->current_surface = NULL;
     return true;
   }
 
   axo_err *error = NULL;
 
   /*
-   * The completed Quake frame is already on the GPU.
-   *
-   * Use the private Quake framebuffer as the source.
-   * The destination is the OpenGL framebuffer backed by the axoverlay2 buffer.
-   * This keeps the image on the GPU instead of reading all pixels back through the CPU.
+   * Copy directly between OpenGL framebuffers so the image stays on the GPU.
    */
   glBindFramebuffer(GL_READ_FRAMEBUFFER, overlay->render_framebuffer);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, surface->framebuffer);
 
   /*
-   * Copy the completed game image into the axoverlay2 buffer.
-   *
-   * The source covers the complete Quake framebuffer.
-   *
-   * Reverse the destination Y coordinates to flip the completed game image vertically for overlay output.
-   *
-   * GL_NEAREST is enough here because the source and destination use the same render size.
-   * If 2x overlay scaling is enabled, axoverlay2 performs that scaling later in the video pipeline.
+   * Preserve the Quake aspect ratio.
+   * Any unused area becomes an opaque black border.
+   */
+  unsigned dst_width = stream->width;
+  unsigned dst_height = stream->height;
+
+  uint64_t dst_aspect = (uint64_t)stream->width * overlay->height;
+  uint64_t src_aspect = (uint64_t)overlay->width * stream->height;
+
+  if (dst_aspect > src_aspect) {
+    dst_width = (unsigned)(((uint64_t)overlay->width * stream->height) / overlay->height);
+    if (!dst_width) {
+      dst_width = 1;
+    }
+  } else if (dst_aspect < src_aspect) {
+    dst_height = (unsigned)(((uint64_t)overlay->height * stream->width) / overlay->width);
+    if (!dst_height) {
+      dst_height = 1;
+    }
+  }
+
+  unsigned dst_x = (stream->width - dst_width) / 2;
+  unsigned dst_y = (stream->height - dst_height) / 2;
+
+  const GLfloat opaque_black[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearBufferfv(GL_COLOR, 0, opaque_black);
+
+  /*
+   * Flip the image vertically while copying it.
+   * Nearest filtering keeps this final copy simple and cheap.
    */
   glBlitFramebuffer(0,
                     0,
                     (GLint)overlay->width,
                     (GLint)overlay->height,
-                    0,
-                    (GLint)overlay->height,
-                    (GLint)overlay->width,
-                    0,
+                    (GLint)dst_x,
+                    (GLint)(dst_y + dst_height),
+                    (GLint)(dst_x + dst_width),
+                    (GLint)dst_y,
                     GL_COLOR_BUFFER_BIT,
                     GL_NEAREST);
 
   /*
-   * The completed Quake image can contain non-opaque alpha values.
-   * In the axoverlay2 output, alpha controls whether the underlying video stream shows through.
-   *
-   * Write only the alpha channel and clear it to 1.0.
-   * The color channels remain unchanged while the completed overlay becomes fully opaque.
+   * Force alpha to fully opaque so the camera image does not show through.
    */
   const GLfloat opaque[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
@@ -490,127 +536,114 @@ overlay_context_end_frame(struct overlay_context *overlay)
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
   /*
-   * Wait until the GPU has completely finished writing the axoverlay2 buffer.
-   * Only then return ownership of that buffer to axoverlay2.
-   *
-   * Without this synchronization, axoverlay2 could use the image before the GPU finished writing it.
+   * Finish GPU writes before returning the buffer to Axoverlay2.
    */
   glFinish();
-
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+  overlay->current_stream = NULL;
   overlay->current_buffer = NULL;
   overlay->current_surface = NULL;
 
   if (!axo_submit_buffer(buffer, NULL, &error)) {
     /*
-     * The stream can disappear between acquiring the buffer and submitting it.
-     * That is handled like a normal stream change rather than a fatal error.
+     * A stream can close between buffer acquisition and submission.
      */
     if (error && axo_err_get_code(error) == AXO_ERR_NO_STREAM) {
       axo_err_clear(&error);
       return true;
     }
-    syslog(LOG_ERR, "Failed to submit overlay buffer: %s", error ? axo_err_get_message(error) : "unknown error");
-    axo_err_clear(&error);
 
+    syslog(LOG_ERR,
+           "Failed to submit overlay buffer for stream %u: %s",
+           stream->stream_id,
+           error ? axo_err_get_message(error) : "unknown error");
+    axo_err_clear(&error);
     return false;
   }
 
-  overlay->frame_count++;
+  stream->frame_count++;
 
-  if (overlay->frame_count % 30 == 0) {
-    syslog(LOG_INFO, "Rendered %u frames on overlay %d", overlay->frame_count, overlay->overlay_id);
+  if (stream->frame_count % 30 == 0) {
+    syslog(LOG_INFO,
+           "Rendered %u frames on overlay %d for stream %u",
+           stream->frame_count,
+           stream->overlay_id,
+           stream->stream_id);
   }
 
   return true;
 }
 
 /*
- * Test helper: draw a changing red and green image through the normal overlay output path.
- * The Yamagi renderer does not call this function.
+ * Find the record for one VDO stream.
  */
-bool
-overlay_context_render_frame(struct overlay_context *overlay, const struct gpu_context *gpu)
+static struct overlay_stream *
+find_overlay_stream(struct overlay_context *overlay, unsigned stream_id)
 {
-  /*
-   * This helper renders a simple changing color instead of a Quake frame.
-   * It is useful for testing the axoverlay2 path without depending on the game renderer.
-   */
-  if (!overlay_context_begin_frame(overlay, gpu)) {
-    return false;
+  for (struct overlay_stream *stream = overlay->streams; stream; stream = stream->next) {
+    if (stream->stream_id == stream_id) {
+      return stream;
+    }
   }
 
-  if (!overlay->current_surface) {
-    return true;
-  }
-
-  float phase = (float)(overlay->frame_count % 120) / 119.0f;
-
-  glClearColor(1.0f - phase, phase, 0.0f, 1.0f);
-
-  glClearDepthf(1.0f);
-  glClearStencil(0);
-
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
-  return overlay_context_end_frame(overlay);
+  return NULL;
 }
 
 /*
- * Create an overlay for the given stream and allocate the private Quake render target.
- * Keep the current overlay if one already exists.
+ * Create the Axoverlay2 overlay for one video stream.
  */
 static bool
-create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned stream_width, unsigned stream_height)
+create_overlay(struct overlay_context *overlay, struct overlay_stream *stream)
 {
-  /*
-   * When both stream dimensions can be divided cleanly by two, Quake renders at half width and half height.
-   *
-   * axoverlay2 then scales the image back to the full video size.
-   * Half width and half height reduce the rendered pixel count to one quarter of the full stream.
-   */
-  bool use_upscale = stream_width % 2 == 0 && stream_height % 2 == 0;
-
-  unsigned used_width = use_upscale ? stream_width / 2 : stream_width;
-  unsigned used_height = use_upscale ? stream_height / 2 : stream_height;
-
-  /*
-   * Hardware alignment can require the allocated axoverlay2 buffer to be larger than the visible image.
-   */
-  unsigned full_width;
-  unsigned full_height;
-
-  axo_err *error = NULL;
-  axo_props *props = NULL;
-  axo_match *match = NULL;
-
-  /*
-   * Only one overlay is used at a time.
-   * Keep the existing overlay instead of creating another one for a different stream.
-   */
-  if (overlay->overlay_id >= 0) {
+  if (stream->overlay_id >= 0) {
     return true;
   }
 
   /*
-   * Ask axoverlay2 for an ARGB32 format suitable for GPU rendering.
-   *
-   * ARGB32 provides four 8-bit components including alpha.
-   * The GPU flag requests a format compatible with GPU rendering.
-   * The compressed flag requests a compressed format when the platform supports one.
+   * Use half-size buffers when both dimensions are even.
+   * Axoverlay2 scales them back to the video size.
+   * This reduces the buffer area to one quarter of the stream size.
+   */
+  bool use_upscale = stream->stream_width % 2 == 0 && stream->stream_height % 2 == 0;
+
+  unsigned used_width = use_upscale ? stream->stream_width / 2 : stream->stream_width;
+  unsigned used_height = use_upscale ? stream->stream_height / 2 : stream->stream_height;
+
+  axo_err *error = NULL;
+
+  /*
+   * Request an ARGB32 format that supports GPU rendering and compression.
    */
   axo_detailed_format *format =
       axo_suggest_detailed_format(AXO_FORMAT_ARGB32, AXO_FORMAT_FLAGS_COMPRESSED | AXO_FORMAT_FLAGS_GPU, &error);
   if (!format) {
-    syslog(LOG_ERR, "Failed to get GPU overlay format: %s", error ? axo_err_get_message(error) : "unknown error");
+    if (error && axo_err_get_code(error) == AXO_ERR_NOT_AVAILABLE) {
+      syslog(LOG_WARNING,
+             "GPU overlay format is temporarily unavailable for stream %u: %s; retrying later",
+             stream->stream_id,
+             axo_err_get_message(error));
+      axo_err_clear(&error);
+      stream->retry_at_us = g_get_monotonic_time() + OVERLAY_CREATE_RETRY_US;
+      return true;
+    }
+
+    syslog(LOG_ERR,
+           "Failed to get GPU overlay format for stream %u: %s",
+           stream->stream_id,
+           error ? axo_err_get_message(error) : "unknown error");
     axo_err_clear(&error);
     return false;
   }
 
   /*
-   * Ask axoverlay2 how large the allocated image must be for the chosen format.
-   * These dimensions can be larger than the visible render size.
+   * The allocated buffer may be larger than the visible image.
+   */
+  unsigned full_width;
+  unsigned full_height;
+
+  /*
+   * Ask Axoverlay2 for the size required by the selected format.
    */
   axo_detailed_format_get_aligned_size(format, used_width, used_height, &full_width, &full_height);
 
@@ -621,27 +654,38 @@ create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned str
   full_height = (full_height + 15) & ~15u;
 
   /*
-   * props configures the overlay buffers.
-   * match selects the video stream that receives the overlay.
+   * props describes the overlay. match selects its video stream.
    */
-  props = axo_props_new();
-  match = axo_match_new();
+  axo_props *props = axo_props_new();
+  axo_match *match = axo_match_new();
+
+  if (!props || !match) {
+    if (props) {
+      axo_props_free(props);
+    }
+    if (match) {
+      axo_match_free(match);
+    }
+
+    axo_detailed_format_free(format);
+    syslog(LOG_ERR, "Failed to allocate overlay creation objects for stream %u", stream->stream_id);
+    return false;
+  }
 
   axo_props_set_detailed_format(props, format);
   axo_props_set_size(props, full_width, full_height);
 
   /*
-   * When half-size rendering is enabled, tell axoverlay2 to scale the overlay by two before compositing it.
+   * Scale half-size buffers back to the video size.
    */
   axo_props_set_upscale_x2(props, use_upscale);
 
   /*
-   * Let the application handle synchronization before an overlay buffer is submitted.
-   * The glFinish() call at the end of each frame waits for the GPU to finish writing the buffer.
+   * The application waits for GPU writes before submitting each buffer.
    */
   axo_props_set_manual_dma_sync(props, true);
 
-  axo_match_stream_id(match, stream_id);
+  axo_match_stream_id(match, stream->stream_id);
 
   int overlay_id = axo_create_overlay(props, match, &error);
 
@@ -649,39 +693,74 @@ create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned str
   axo_match_free(match);
 
   if (overlay_id < 0) {
-    syslog(LOG_ERR, "Failed to create overlay: %s", error ? axo_err_get_message(error) : "unknown error");
+    if (error && axo_err_get_code(error) == AXO_ERR_NO_STREAM) {
+      /*
+       * The stream disappeared between discovery and overlay creation.
+       * VDO will provide the CLOSED event which removes this record.
+       */
+      syslog(LOG_INFO, "VDO stream %u disappeared while creating its overlay", stream->stream_id);
+      stream->retry_at_us = 0;
+      axo_err_clear(&error);
+      axo_detailed_format_free(format);
+      return true;
+    }
 
+    if (error && axo_err_get_code(error) == AXO_ERR_NOT_AVAILABLE) {
+      syslog(LOG_WARNING,
+             "Overlay service is temporarily unavailable for stream %u: %s; retrying later",
+             stream->stream_id,
+             axo_err_get_message(error));
+      stream->retry_at_us = g_get_monotonic_time() + OVERLAY_CREATE_RETRY_US;
+      axo_err_clear(&error);
+      axo_detailed_format_free(format);
+      return true;
+    }
+
+    syslog(LOG_ERR,
+           "Failed to create overlay for stream %u: %s",
+           stream->stream_id,
+           error ? axo_err_get_message(error) : "unknown error");
     axo_err_clear(&error);
     axo_detailed_format_free(format);
     return false;
   }
 
-  overlay->overlay_id = overlay_id;
-  overlay->stream_id = stream_id;
-  overlay->format = format;
+  stream->overlay_id = overlay_id;
+  stream->format = format;
 
   /*
-   * width and height describe the visible image Quake renders.
-   *
-   * full_width and full_height are the allocated buffer dimensions required by the axoverlay2 format.
+   * width and height are visible.
+   * full_width and full_height include any required padding.
    */
-  overlay->width = used_width;
-  overlay->height = used_height;
-  overlay->full_width = full_width;
-  overlay->full_height = full_height;
-  overlay->frame_count = 0;
+  stream->width = used_width;
+  stream->height = used_height;
+  stream->full_width = full_width;
+  stream->full_height = full_height;
+  stream->frame_count = 0;
+  stream->retry_at_us = 0;
 
-  if (!create_render_target(overlay)) {
-    remove_overlay(overlay);
-    return false;
+  /*
+   * The first stream selects the shared Quake render size.
+   * Keep that size until all streams close.
+   */
+  if (!overlay->render_framebuffer) {
+    overlay->width = used_width;
+    overlay->height = used_height;
+
+    if (!create_render_target(overlay)) {
+      (void)destroy_stream_overlay(stream);
+      overlay->width = 0;
+      overlay->height = 0;
+      return false;
+    }
   }
 
   syslog(LOG_INFO,
-         "Created GPU overlay %d on stream %u: stream %ux%u, render %ux%u, buffer %ux%u%s",
+         "Created GPU overlay %d on stream %u: stream %ux%u, overlay %ux%u, buffer %ux%u%s",
          overlay_id,
-         stream_id,
-         stream_width,
-         stream_height,
+         stream->stream_id,
+         stream->stream_width,
+         stream->stream_height,
          used_width,
          used_height,
          full_width,
@@ -692,16 +771,241 @@ create_overlay(struct overlay_context *overlay, unsigned stream_id, unsigned str
 }
 
 /*
- * Create the private framebuffer with color, depth and stencil storage at the Quake render size.
+ * Add a video stream or update its size.
+ */
+static bool
+register_overlay_stream(struct overlay_context *overlay,
+                        unsigned stream_id,
+                        unsigned stream_width,
+                        unsigned stream_height)
+{
+  struct overlay_stream *stream = find_overlay_stream(overlay, stream_id);
+
+  if (!stream) {
+    stream = calloc(1, sizeof(*stream));
+    if (!stream) {
+      syslog(LOG_ERR, "Failed to allocate overlay stream record");
+      return false;
+    }
+
+    stream->stream_id = stream_id;
+    stream->overlay_id = -1;
+    stream->next = overlay->streams;
+    overlay->streams = stream;
+  }
+
+  bool dimensions_changed = stream->stream_width != stream_width || stream->stream_height != stream_height;
+
+  stream->stream_width = stream_width;
+  stream->stream_height = stream_height;
+
+  if (dimensions_changed && stream->overlay_id >= 0) {
+    syslog(LOG_INFO,
+           "VDO stream %u changed size to %ux%u; recreating its overlay",
+           stream_id,
+           stream_width,
+           stream_height);
+    if (!destroy_stream_overlay(stream)) {
+      return false;
+    }
+  }
+
+  stream->retry_at_us = 0;
+
+  syslog(LOG_INFO, "VDO stream %u available: %ux%u", stream_id, stream_width, stream_height);
+
+  return create_overlay(overlay, stream);
+}
+
+/*
+ * Retry temporary overlay creation failures once per second.
+ */
+static bool
+retry_pending_overlays(struct overlay_context *overlay)
+{
+  int64_t now = g_get_monotonic_time();
+
+  for (struct overlay_stream *stream = overlay->streams; stream; stream = stream->next) {
+    if (stream->overlay_id < 0 && stream->retry_at_us > 0 && stream->retry_at_us <= now) {
+      if (!create_overlay(overlay, stream)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+/*
+ * Select the next stream in round-robin order.
+ *
+ * Only one stream is selected per Quake frame.
+ */
+static struct overlay_stream *
+select_output_stream(struct overlay_context *overlay)
+{
+  unsigned active_count = 0;
+
+  for (struct overlay_stream *stream = overlay->streams; stream; stream = stream->next) {
+    if (stream->overlay_id >= 0) {
+      active_count++;
+    }
+  }
+
+  if (!active_count) {
+    return NULL;
+  }
+
+  unsigned target = overlay->next_stream_index % active_count;
+  overlay->next_stream_index = (target + 1) % active_count;
+
+  unsigned current = 0;
+
+  for (struct overlay_stream *stream = overlay->streams; stream; stream = stream->next) {
+    if (stream->overlay_id < 0) {
+      continue;
+    }
+
+    if (current == target) {
+      return stream;
+    }
+
+    current++;
+  }
+
+  return NULL;
+}
+
+/*
+ * Remove one stream's Axoverlay2 overlay and imported buffers.
+ *
+ * The stream record itself is kept so the overlay can be created again later.
+ */
+static bool
+destroy_stream_overlay(struct overlay_stream *stream)
+{
+  axo_err *error = NULL;
+
+  if (stream->overlay_id >= 0 && !axo_remove_overlay(stream->overlay_id, &error)) {
+    /*
+     * NO_STREAM means the video stream already disappeared.
+     * For any other error, keep the overlay ID so cleanup can be tried again.
+     */
+    if (!error || axo_err_get_code(error) != AXO_ERR_NO_STREAM) {
+      syslog(LOG_ERR,
+             "Failed to remove overlay %d from stream %u: %s",
+             stream->overlay_id,
+             stream->stream_id,
+             error ? axo_err_get_message(error) : "unknown error");
+      axo_err_clear(&error);
+      return false;
+    }
+  }
+
+  axo_err_clear(&error);
+
+  /*
+   * The overlay is gone, so its imported buffers can now be released.
+   */
+  destroy_render_surfaces(stream);
+
+  if (stream->format) {
+    axo_detailed_format_free(stream->format);
+  }
+
+  stream->overlay_id = -1;
+  stream->format = NULL;
+  stream->width = 0;
+  stream->height = 0;
+  stream->full_width = 0;
+  stream->full_height = 0;
+  stream->frame_count = 0;
+
+  return true;
+}
+
+/*
+ * Remove one stream and the overlay attached to it.
+ */
+static bool
+remove_overlay_stream(struct overlay_context *overlay, unsigned stream_id)
+{
+  struct overlay_stream **link = &overlay->streams;
+
+  while (*link && (*link)->stream_id != stream_id) {
+    link = &(*link)->next;
+  }
+
+  if (!*link) {
+    return true;
+  }
+
+  struct overlay_stream *stream = *link;
+
+  /*
+   * Keep the stream record if Axoverlay2 cannot remove the overlay.
+   * The overlay ID is needed if cleanup has to be tried again during shutdown.
+   */
+  if (!destroy_stream_overlay(stream)) {
+    return false;
+  }
+
+  if (overlay->current_stream == stream) {
+    overlay->current_stream = NULL;
+    overlay->current_buffer = NULL;
+    overlay->current_surface = NULL;
+  }
+
+  *link = stream->next;
+  free(stream);
+
+  if (!overlay->streams) {
+    /*
+     * The next stream may use a different size, so discard the shared Quake image
+     * when the last stream closes.
+     */
+    destroy_render_target(overlay);
+    overlay->width = 0;
+    overlay->height = 0;
+    overlay->next_stream_index = 0;
+  }
+
+  return true;
+}
+
+/*
+ * Release all stream records during shutdown.
+ *
+ * Shutdown is best effort. If Axoverlay2 refuses to remove an overlay, local
+ * graphics objects are still released before the application stops Axoverlay2.
+ */
+static void
+remove_all_overlay_streams(struct overlay_context *overlay)
+{
+  while (overlay->streams) {
+    struct overlay_stream *stream = overlay->streams;
+    overlay->streams = stream->next;
+
+    if (!destroy_stream_overlay(stream)) {
+      destroy_render_surfaces(stream);
+
+      if (stream->format) {
+        axo_detailed_format_free(stream->format);
+      }
+    }
+
+    free(stream);
+  }
+}
+
+/*
+ * Create the shared framebuffer that Quake renders into.
  */
 static bool
 create_render_target(struct overlay_context *overlay)
 {
   /*
-   * Keep one private game image at a fixed size.
-   *
-   * During an active output frame, this framebuffer receives Quake's final image.
-   * At the end of the frame, overlay_context_end_frame() copies the image into the current axoverlay2 buffer.
+   * This framebuffer exists independently of the Axoverlay2 output buffers.
    */
 
   glGenTextures(1, &overlay->render_texture);
@@ -721,9 +1025,6 @@ create_render_target(struct overlay_context *overlay)
                GL_RGBA,
                GL_UNSIGNED_BYTE,
                NULL);
-
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
   glGenFramebuffers(1, &overlay->render_framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, overlay->render_framebuffer);
@@ -757,7 +1058,7 @@ create_render_target(struct overlay_context *overlay)
 }
 
 /*
- * Delete the private Quake framebuffer and its color, depth and stencil storage, then clear their handles.
+ * Destroy the shared Quake framebuffer and its attachments.
  */
 static void
 destroy_render_target(struct overlay_context *overlay)
@@ -779,16 +1080,16 @@ destroy_render_target(struct overlay_context *overlay)
 }
 
 /*
- * Find the cached OpenGL surface for an axoverlay2 buffer ID, or return NULL if it has not been imported.
+ * Find the OpenGL objects already created for an Axoverlay2 buffer.
  */
 static struct render_surface *
-find_render_surface(struct overlay_context *overlay, unsigned long buffer_id)
+find_render_surface(struct overlay_stream *stream, unsigned long buffer_id)
 {
-  struct render_surface *surface = overlay->surfaces;
+  struct render_surface *surface = stream->surfaces;
 
   while (surface) {
     /*
-     * Buffer IDs remain stable, so an equal ID means this is the same axoverlay2 buffer we prepared earlier.
+     * Buffer IDs remain stable for the lifetime of this overlay.
      */
     if (surface->buffer_id == buffer_id) {
       return surface;
@@ -800,16 +1101,13 @@ find_render_surface(struct overlay_context *overlay, unsigned long buffer_id)
 }
 
 /*
- * Import an axoverlay2 buffer into EGL and create the OpenGL objects needed to use it as an output framebuffer.
+ * Import one Axoverlay2 output buffer into OpenGL.
  */
 static struct render_surface *
-create_render_surface(struct overlay_context *overlay, const struct gpu_context *gpu, axo_buffer *buffer)
+create_render_surface(struct overlay_stream *stream, const struct gpu_context *gpu, axo_buffer *buffer)
 {
   /*
-   * These are EGL and OpenGL ES extension functions, so their addresses are requested from the graphics driver.
-   *
-   * eglCreateImageKHR imports the DMA-BUF backing the axoverlay2 buffer into EGL.
-   * glEGLImageTargetTexture2DOES connects that EGL image to an OpenGL texture.
+   * These extension functions connect the shared Axoverlay2 buffer to OpenGL.
    */
   PFNEGLCREATEIMAGEKHRPROC create_image = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
 
@@ -822,10 +1120,7 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
   }
 
   /*
-   * Get the DMA-BUF file descriptor for the axoverlay2 buffer.
-   *
-   * DMA-BUF allows axoverlay2 and the GPU to access the same image buffer.
-   * This avoids reading the completed image back to the CPU and copying it into another buffer.
+   * DMA-BUF is the shared image buffer used by Axoverlay2 and the GPU.
    */
   int dma_buf_fd = axo_buffer_get_dma_buf_fd(buffer);
 
@@ -834,31 +1129,27 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
     return NULL;
   }
 
-  axo_detailed_format *format = overlay->format;
+  axo_detailed_format *format = stream->format;
 
   /*
-   * DRM FourCC describes the shared image's pixel format so EGL knows how to interpret the color data.
+   * FourCC tells EGL how the pixels are stored.
    */
   uint32_t fourcc = axo_detailed_format_get_drm_fourcc(format);
 
   /*
-   * The DRM modifier describes the memory layout selected for this GPU buffer.
-   * The value is 64 bits, while EGL receives it as separate low and high 32-bit values below.
+   * The modifier tells EGL how the buffer is laid out in memory.
    */
   uint64_t modifier = axo_detailed_format_get_drm_modifier(format, 0);
 
   /*
-   * Describe the DMA-BUF backing the axoverlay2 buffer to EGL.
-   *
-   * EGL needs the allocated dimensions, pixel format and DMA-BUF handle before it can import the image.
-   * It also needs the first-plane offset, row pitch and GPU memory layout.
+   * Describe the shared buffer so EGL can import it.
    */
   EGLint attributes[] = {
     EGL_WIDTH,
-    (EGLint)overlay->full_width,
+    (EGLint)stream->full_width,
 
     EGL_HEIGHT,
-    (EGLint)overlay->full_height,
+    (EGLint)stream->full_height,
 
     EGL_LINUX_DRM_FOURCC_EXT,
     (EGLint)fourcc,
@@ -873,13 +1164,13 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
     0,
 
     /*
-     * ARGB32 uses four bytes for each pixel in the logical image row.
+     * ARGB32 uses four bytes per pixel.
      */
     EGL_DMA_BUF_PLANE0_PITCH_EXT,
-    (EGLint)(overlay->full_width * 4),
+    (EGLint)(stream->full_width * 4),
 
     /*
-     * Split the 64-bit DRM modifier into the two 32-bit values expected by EGL.
+     * EGL expects the 64-bit modifier as two 32-bit values.
      */
     EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
     (EGLint)(modifier & 0xffffffff),
@@ -891,7 +1182,7 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
   };
 
   /*
-   * Zero-initialize the OpenGL handles so cleanup can safely handle partial initialization.
+   * Zeroed handles make partial cleanup safe.
    */
   struct render_surface *surface = calloc(1, sizeof(*surface));
   if (!surface) {
@@ -903,14 +1194,12 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
   surface->display = gpu->display;
 
   /*
-   * EGL uses its own invalid image value, so set it explicitly instead of relying on the zero-filled allocation.
+   * EGL uses a specific value for an invalid image.
    */
   surface->image = EGL_NO_IMAGE_KHR;
 
   /*
-   * Import the DMA-BUF backing the axoverlay2 buffer as an EGL image.
-   *
-   * EGL_LINUX_DMA_BUF_EXT tells EGL that the image is backed by the Linux DMA-BUF described above.
+   * Import the shared buffer as an EGL image.
    */
   surface->image = create_image(gpu->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attributes);
 
@@ -924,15 +1213,12 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
   glBindTexture(GL_TEXTURE_2D, surface->texture);
 
   /*
-   * Connect the imported EGL image to the texture.
-   *
-   * After this call, writes through the OpenGL texture affect the image owned by the axoverlay2 buffer.
+   * Connect the EGL image to the OpenGL texture.
    */
   image_target_texture(GL_TEXTURE_2D, surface->image);
 
   /*
-   * Binding the EGL image to an OpenGL texture can fail even when the EGL import succeeded.
-   * Check the OpenGL error separately.
+   * Check the OpenGL step separately from the EGL import.
    */
   GLenum gl_error = glGetError();
   if (gl_error != GL_NO_ERROR) {
@@ -943,22 +1229,12 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
   }
 
   /*
-   * Attaching the imported texture to a framebuffer lets OpenGL write directly into the axoverlay2 buffer.
+   * Attach the texture to a framebuffer so it can receive the final copy.
    */
   glGenFramebuffers(1, &surface->framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, surface->framebuffer);
 
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, surface->texture, 0);
-
-  glGenRenderbuffers(1, &surface->depth_stencil);
-  glBindRenderbuffer(GL_RENDERBUFFER, surface->depth_stencil);
-
-  glRenderbufferStorage(
-      GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, (GLsizei)overlay->full_width, (GLsizei)overlay->full_height);
-
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, surface->depth_stencil);
-
-  glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
   GLenum framebuffer_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
@@ -975,7 +1251,7 @@ create_render_surface(struct overlay_context *overlay, const struct gpu_context 
 }
 
 /*
- * Release the EGL and OpenGL objects for one imported buffer and free its render_surface structure.
+ * Release the OpenGL objects created for one output buffer.
  */
 static void
 destroy_render_surface(struct render_surface *surface)
@@ -987,10 +1263,6 @@ destroy_render_surface(struct render_surface *surface)
     return;
   }
 
-  if (surface->depth_stencil) {
-    glDeleteRenderbuffers(1, &surface->depth_stencil);
-  }
-
   if (surface->framebuffer) {
     glDeleteFramebuffers(1, &surface->framebuffer);
   }
@@ -1000,11 +1272,11 @@ destroy_render_surface(struct render_surface *surface)
   }
 
   /*
-   * The EGL image is a separate object from the OpenGL texture and must also be released.
+   * The EGL image must be released separately from the texture.
    */
   if (surface->image != EGL_NO_IMAGE_KHR) {
     /*
-     * eglDestroyImageKHR is an EGL extension, so obtain its address from the graphics driver at runtime.
+     * eglDestroyImageKHR is loaded from the graphics driver at runtime.
      */
     PFNEGLDESTROYIMAGEKHRPROC destroy_image = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
 
@@ -1016,68 +1288,19 @@ destroy_render_surface(struct render_surface *surface)
 }
 
 /*
- * Release every cached render surface and clear the list.
+ * Release every imported buffer for one stream.
  */
 static void
-destroy_render_surfaces(struct overlay_context *overlay)
+destroy_render_surfaces(struct overlay_stream *stream)
 {
-  struct render_surface *surface = overlay->surfaces;
+  struct render_surface *surface = stream->surfaces;
 
   while (surface) {
-    /*
-     * Save the next pointer before freeing the current entry because the current structure then becomes invalid.
-     */
-    struct render_surface *next = surface->next;
 
+    struct render_surface *next = surface->next;
     destroy_render_surface(surface);
     surface = next;
   }
-  overlay->surfaces = NULL;
-}
 
-/*
- * Release the active overlay and its graphics resources, then reset the state associated with its stream.
- */
-static void
-remove_overlay(struct overlay_context *overlay)
-{
-  axo_err *error = NULL;
-
-  /*
-   * Forget any frame that was active when the video stream disappeared.
-   */
-  overlay->current_surface = NULL;
-  overlay->current_buffer = NULL;
-
-  /*
-   * Destroy Quake's private render target and the imported EGL and OpenGL objects before removing their overlay.
-   */
-  destroy_render_target(overlay);
-  destroy_render_surfaces(overlay);
-
-  if (overlay->overlay_id >= 0) {
-    if (!axo_remove_overlay(overlay->overlay_id, &error)) {
-      syslog(LOG_ERR,
-             "Failed to remove overlay %d: %s",
-             overlay->overlay_id,
-             error ? axo_err_get_message(error) : "unknown error");
-    }
-    axo_err_clear(&error);
-    overlay->overlay_id = -1;
-  }
-
-  if (overlay->format) {
-    axo_detailed_format_free(overlay->format);
-    overlay->format = NULL;
-  }
-
-  /*
-   * Reset all stream-specific values so the same overlay_context can be reused if another video stream appears.
-   */
-  overlay->stream_id = 0;
-  overlay->width = 0;
-  overlay->height = 0;
-  overlay->full_width = 0;
-  overlay->full_height = 0;
-  overlay->frame_count = 0;
+  stream->surfaces = NULL;
 }

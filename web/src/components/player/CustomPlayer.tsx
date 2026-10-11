@@ -102,6 +102,14 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     const [volume, setVolume] = useState<number>();
     const [expanded, setExpanded] = useState(true);
 
+    /**
+     * Playback intent is separate from the temporary stream state.
+     *
+     * Visibility changes stop the actual stream connection while the page is hidden,
+     * but they must not turn an explicit user Stop into an automatic restart later.
+     */
+    const playbackRequestedRef = useRef(autoPlay);
+
     const [format, setFormat] = useLocalStorage(
       'streamFormat',
       initialFormat,
@@ -159,10 +167,12 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
 
     const onPlayStop = useCallback(() => {
       if (host) {
+        playbackRequestedRef.current = false;
         setPlay(false);
         setHost('');
         setWaiting(false);
       } else {
+        playbackRequestedRef.current = true;
         setWaiting(true);
         setHost(hostname);
         setPlay(true);
@@ -170,6 +180,7 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     }, [host, hostname]);
 
     const onRefresh = useCallback(() => {
+      playbackRequestedRef.current = true;
       setPlay(true);
       setRefresh((value) => value + 1);
       setWaiting(true);
@@ -190,13 +201,6 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
       link.dispatchEvent(event);
     }, [videoProperties]);
 
-    /* NOTE: This callback is never used, stop is handled in onPlayStop */
-    const onStop = useCallback(() => {
-      setPlay(false);
-      setHost('');
-      setWaiting(false);
-    }, []);
-
     const onVapix = useCallback((key: string, value: string) => {
       setVapixParameters((p: typeof vapixParams) => {
         const newParams = { ...p, [key]: value };
@@ -213,14 +217,22 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     }, []);
 
     /**
-     * Refresh when changing visibility
-     * (e.g. when you leave a tab the video will halt, so when you return we need to play again).
+     * Reconnect playback after the page becomes visible again.
+     *
+     * Hiding the page closes the current stream but keeps the user's play/stop choice.
+     * When the page becomes visible, a new stream is opened only if playback is still requested.
      */
     useEffect(() => {
       const cb = () => {
         if (document.visibilityState === 'visible') {
+          if (!playbackRequestedRef.current) {
+            return;
+          }
+
           setPlay(true);
           setHost(hostname);
+          setRefresh((value) => value + 1);
+          setWaiting(true);
         } else if (document.visibilityState === 'hidden') {
           setPlay(false);
           setWaiting(false);
@@ -287,10 +299,14 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
     }, [videoProperties, volume]);
 
     /**
-     * Refresh on stream end
+     * Retry an ended stream only while playback is still requested.
      */
     const onEnded = useCallback(() => {
-      if (autoRetry) {
+      if (
+        autoRetry &&
+        playbackRequestedRef.current &&
+        document.visibilityState === 'visible'
+      ) {
         onRefresh();
       }
     }, [autoRetry, onRefresh]);
@@ -375,7 +391,6 @@ export const CustomPlayer = forwardRef<PlayerNativeElement, CustomPlayerProps>(
             src={host}
             parameters={vapixParameters}
             onPlay={onPlayStop}
-            onStop={onStop}
             onRefresh={onRefresh}
             onScreenshot={onScreenshot}
             onFormat={(fmt) => {

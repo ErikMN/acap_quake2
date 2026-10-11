@@ -11,6 +11,7 @@
     - [Renderer hooks](#renderer-hooks)
   - [3. Graphics context](#3-graphics-context)
   - [4. Video stream and overlay setup](#4-video-stream-and-overlay-setup)
+    - [Overlay creation](#overlay-creation)
     - [Render size](#render-size)
   - [5. Private Quake framebuffer](#5-private-quake-framebuffer)
   - [6. Importing axoverlay2 buffers](#6-importing-axoverlay2-buffers)
@@ -19,6 +20,7 @@
     - [Completing the frame](#completing-the-frame)
     - [Final alpha](#final-alpha)
     - [Synchronization](#synchronization)
+    - [Stream selection](#stream-selection)
   - [8. Input architecture](#8-input-architecture)
     - [Browser input handler](#browser-input-handler)
     - [WebSocket server](#websocket-server)
@@ -127,7 +129,7 @@ On ACAP it calls `overlay_context_begin_frame()`.
 
 The patch also adds `GL3_BindOutputFramebuffer()`.
 On ACAP it calls `overlay_context_bind_frame()`.
-When an axoverlay2 output buffer is active, that function binds the private framebuffer owned by `overlay.c`.
+When the shared Quake framebuffer exists, that function binds the private framebuffer owned by `overlay.c`.
 Otherwise it binds framebuffer 0, the default framebuffer provided by the EGL surface.
 A normal desktop build uses framebuffer 0 for the window.
 
@@ -176,6 +178,7 @@ It then terminates the EGL display connection.
 ## 4. Video stream and overlay setup
 
 `src/overlay.c` connects the completed Quake frame to a camera video stream.
+The multi-stream implementation can do this for every active stream.
 
 The code uses three systems with separate roles:
 
@@ -190,16 +193,37 @@ The renderer checks for existing, created, and closed streams during setup and a
 
 When an existing or newly created stream is reported, the code reads its stream ID, width, and height.
 It then calls `create_overlay()`.
+The call goes through the stream registration path so each stream keeps its own state.
 
-If the active stream closes, `remove_overlay()` releases the resources associated with that overlay.
+Each active video stream has its own `overlay_stream` record and its own axoverlay2 overlay.
+If a stream closes, `remove_overlay_stream()` releases only the resources associated with that stream.
+Other open streams keep their own overlays.
 
-The code keeps at most one active overlay.
-The first stream for which `create_overlay()` succeeds gets the overlay.
-Further stream events do not create another overlay while it remains active.
-The code does not keep a list of other streams to switch to when that stream closes.
+If a stream changes size, its overlay is removed and created again using the new size.
+
+During renderer startup, Yamagi calls `overlay_context_process_events()` before it asks for the drawable size.
+This lets an already-active stream create the shared Quake framebuffer before rendering starts.
+`overlay_context_begin_frame()` processes later stream events at the start of every game frame.
+
+All axoverlay2 calls run on the render thread.
+The application never calls axoverlay2 from two threads at the same time.
+
+### Overlay creation
+
+Overlay buffers use ARGB32 with GPU access and compression when available.
+
+`AXO_ERR_NO_STREAM` during creation means the stream closed before the overlay was created.
+The stream record stays until the VDO `CLOSED` event arrives.
+
+`AXO_ERR_NOT_AVAILABLE` is treated as temporary and retried after one second.
+Other creation errors stop rendering instead of being retried forever.
 
 ### Render size
 
+For each stream, `create_overlay()` chooses the visible overlay size.
+The first stream for which overlay creation succeeds also selects the size of the shared image that Quake renders.
+
+For that first stream, the following rule applies.
 `create_overlay()` chooses the size of the image that Quake renders.
 
 If both stream dimensions are divisible by two, Quake renders at half width and half height.
@@ -209,11 +233,19 @@ A 1920x1080 video stream therefore uses a 960x540 Quake render target.
 
 If either stream dimension is not divisible by two, Quake renders at the full stream size.
 
+Later streams choose their own overlay size, but they do not change the shared Quake render size.
+
 `overlay_context.width` and `overlay_context.height` store the size used by Quake.
 `full_width` and `full_height` store the allocated axoverlay2 buffer size.
+These fields belong to each stream's `overlay_stream` record.
 The code first asks axoverlay2 for the required size, then rounds both dimensions up to multiples of 16.
 These extra pixels satisfy buffer layout requirements.
 They do not increase the Quake render size.
+
+The Quake render size stays unchanged while any stream record exists.
+If another stream has a different size or aspect ratio, the completed Quake image is fitted into that stream when it is copied.
+When the final stream closes, the shared Quake framebuffer is destroyed.
+A later stream can then select a new render size.
 
 ## 5. Private Quake framebuffer
 
@@ -230,15 +262,21 @@ It can use temporary framebuffers for intermediate rendering.
 
 This gives Yamagi one stable final render target while axoverlay2 manages its own set of output buffers.
 
+The same framebuffer is also used when no axoverlay2 buffer is ready.
+Quake can therefore finish a game frame even when nothing can be submitted.
+
+When a stream buffer is available, the copy can proceed.
 The completed color image is then copied into the current axoverlay2 buffer on the GPU.
 The [frame lifecycle](#7-frame-lifecycle) below shows the complete sequence.
 
 ## 6. Importing axoverlay2 buffers
 
 `overlay_context_begin_frame()` requests an output buffer with `axo_get_buffer()`.
+The request is made for the stream selected for the current Quake frame.
 
 Each axoverlay2 buffer has a stable buffer ID.
 `overlay.c` uses that ID to check whether the buffer has already been imported.
+The lookup is kept separate for each stream.
 
 A new buffer is imported by `create_render_surface()`.
 
@@ -272,12 +310,18 @@ The import includes:
 `glEGLImageTargetTexture2DOES()` binds the imported EGL image to an OpenGL texture.
 That texture is attached to an OpenGL framebuffer.
 
-A `render_surface` stores these EGL and OpenGL objects, the buffer ID, and a depth and stencil renderbuffer.
+A `render_surface` stores these EGL and OpenGL objects and the buffer ID.
 The texture and EGL image refer to the same color buffer.
 Importing it does not copy the completed game image.
 
 Imported surfaces are stored in a linked list.
+Each stream has its own list.
 When axoverlay2 returns the same buffer again, the existing `render_surface` is reused.
+
+The imported output framebuffer contains only the axoverlay2-backed color texture.
+Depth and stencil storage are not needed there because Quake renders into the shared framebuffer instead.
+
+All imported objects are released when their stream overlay is removed.
 
 ## 7. Frame lifecycle
 
@@ -287,6 +331,7 @@ A frame with an available overlay buffer follows this path:
 flowchart TD
     Begin[Begin frame]
     Events[Process VDO events]
+    Select[Select one active stream]
     Acquire[axo_get_buffer]
     Known{Buffer already imported}
     Reuse[Reuse render surface]
@@ -299,7 +344,7 @@ flowchart TD
     Submit[axo_submit_buffer]
     Video[Camera video stream]
 
-    Begin --> Events --> Acquire --> Known
+    Begin --> Events --> Select --> Acquire --> Known
     Known -->|Yes| Reuse --> Bind
     Known -->|No| Import --> Bind
     Bind --> Render --> Blit --> Alpha --> Finish --> Submit --> Video
@@ -308,7 +353,12 @@ flowchart TD
 ### Beginning the frame
 
 `overlay_context_begin_frame()` first processes pending VDO events.
+It also retries temporary overlay creation failures whose retry delay has expired.
+
+If one or more stream overlays are active, one stream is selected in round-robin order.
 If an overlay exists, it asks axoverlay2 for the next available buffer.
+The selected stream determines which overlay is queried.
+Only one `axo_get_buffer()` call is made per Quake frame.
 
 If there is no overlay, or buffer acquisition reports `AXO_ERR_WAIT` or `AXO_ERR_NO_STREAM`,
 `overlay_context_begin_frame()` returns true with no active output buffer.
@@ -316,17 +366,22 @@ Yamagi still runs the frame, but `overlay_context_end_frame()` has no overlay bu
 
 If a buffer is returned, the matching `render_surface` is found or created.
 The buffer and surface are stored as the current output state.
+The selected stream is stored with them.
 The private Quake framebuffer is then bound. Its viewport, the area used for drawing, is set to the Quake render size.
 
 ### Completing the frame
 
 `overlay_context_end_frame()` first checks whether a current buffer and surface exist.
+The selected stream must also still be present.
 If not, there is no output buffer to submit for that frame.
 
 When a buffer exists, the code binds:
 
 - the private Quake framebuffer as `GL_READ_FRAMEBUFFER`
 - the framebuffer backed by the axoverlay2 buffer as `GL_DRAW_FRAMEBUFFER`
+
+The Quake image is fitted inside the selected stream without changing its aspect ratio.
+Unused space is filled with opaque black.
 
 `glBlitFramebuffer()` copies the color image between the two GPU framebuffers.
 The destination Y coordinates are reversed, so the copy also flips the image vertically.
@@ -349,6 +404,26 @@ This makes the application responsible for completing its GPU writes before retu
 
 Before the buffer is submitted, `glFinish()` waits for the GPU to complete its writes.
 The code then clears the current buffer state and calls `axo_submit_buffer()`.
+
+If the stream closes between acquiring and submitting the buffer, `AXO_ERR_NO_STREAM` is treated as a normal close race.
+Other submission errors stop rendering.
+
+### Stream selection
+
+Active streams are selected in round-robin order.
+
+Only one stream receives a new output buffer during each Quake frame.
+With N active streams, each stream gets about one out of every N output opportunities.
+Quake itself still renders every game frame.
+
+With two streams, the selection looks like this:
+
+```text
+frame 1 -> stream A
+frame 2 -> stream B
+frame 3 -> stream A
+frame 4 -> stream B
+```
 
 ## 8. Input architecture
 
@@ -518,7 +593,7 @@ It adds these command-line arguments before any user-supplied arguments:
 - `+set vid_fullscreen 0`
 - `+set r_msaa_samples 0`
 - `+set r_vsync 0`
-- `+map q2dm1`
+- `+newgame`
 
 It creates `localdata` inside the package directory and assigns that path to `HOME`.
 
@@ -540,7 +615,8 @@ See [Audio playback](BUILD.md#audio-playback) for output selection and permissio
 Here, ownership means responsibility for keeping a resource valid and releasing it when finished.
 
 - `gpu_context` owns the EGL display, OpenGL ES context, and 1x1 pbuffer.
-- `overlay_context` owns the VDO event stream and the resources associated with the active overlay.
+- `overlay_context` owns the VDO event stream, the active stream records, and the shared Quake render target.
+- Each `overlay_stream` owns one Axoverlay2 overlay, its format, and its imported buffers.
 - `render_surface` owns the EGL and OpenGL objects created for one imported axoverlay2 buffer.
 - The WebSocket thread owns network servicing and produces decoded input events.
 - The input queue transfers events from the WebSocket thread to the Yamagi game thread.
@@ -559,9 +635,6 @@ The renderer releases overlay graphics resources before destroying the EGL conte
 - For queue ordering or overflow behavior, start with `src/input/input_queue.c` and `src/input/acap_input.c`.
 - For incorrect Quake key or mouse behavior, start with `src/input/yamagi_input.c`.
 - For mouse wheel weapon bindings, start with `config/autoexec.cfg`.
-
-`overlay_context_render_frame()` is a test helper that draws a changing red and green image through the overlay path.
-The Yamagi renderer does not call it. It is compiled into the renderer but is not a selectable game mode.
 
 ## 12. Recommended reading order
 
