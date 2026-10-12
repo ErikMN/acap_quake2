@@ -223,10 +223,7 @@ Other creation errors stop rendering instead of being retried forever.
 For each stream, `create_overlay()` chooses the visible overlay size.
 The first stream for which overlay creation succeeds also selects the size of the shared image that Quake renders.
 
-For that first stream, the following rule applies.
-`create_overlay()` chooses the size of the image that Quake renders.
-
-If both stream dimensions are divisible by two, Quake renders at half width and half height.
+If both dimensions of that first stream are divisible by two, Quake renders at half width and half height.
 The overlay is then configured with 2x upscaling.
 
 A 1920x1080 video stream therefore uses a 960x540 Quake render target.
@@ -323,6 +320,10 @@ Depth and stencil storage are not needed there because Quake renders into the sh
 
 All imported objects are released when their stream overlay is removed.
 
+If a new output buffer cannot be imported, that buffer is not submitted.
+The affected stream overlay is removed and scheduled for recreation after one second.
+Other stream overlays remain active while that retry is pending.
+
 ## 7. Frame lifecycle
 
 A frame with an available overlay buffer follows this path:
@@ -331,7 +332,7 @@ A frame with an available overlay buffer follows this path:
 flowchart TD
     Begin[Begin frame]
     Events[Process VDO events]
-    Select[Select one active stream]
+    Select[Select one due stream]
     Acquire[axo_get_buffer]
     Known{Buffer already imported}
     Reuse[Reuse render surface]
@@ -355,13 +356,22 @@ flowchart TD
 `overlay_context_begin_frame()` first processes pending VDO events.
 It also retries temporary overlay creation failures whose retry delay has expired.
 
-If one or more stream overlays are active, one stream is selected in round-robin order.
-If an overlay exists, it asks axoverlay2 for the next available buffer.
-The selected stream determines which overlay is queried.
+Each stream records the frame rate reported by VDO and derives a minimum interval between buffer requests.
+Streams whose next buffer-request deadline has not arrived are skipped.
+Among the streams that are currently due, one stream is selected in round-robin order.
+Only that stream is asked for an axoverlay2 output buffer.
 Only one `axo_get_buffer()` call is made per Quake frame.
 
-If there is no overlay, or buffer acquisition reports `AXO_ERR_WAIT` or `AXO_ERR_NO_STREAM`,
-`overlay_context_begin_frame()` returns true with no active output buffer.
+If no stream is due, `overlay_context_begin_frame()` waits on the VDO event file descriptor instead of rendering as fast as possible.
+The wait ends when a VDO event arrives, when the earliest stream deadline is reached, or after 33 ms, whichever happens first.
+If there is no upcoming stream deadline, the wait is limited to 33 ms.
+The function then returns true with no active output buffer, so Yamagi can advance without busy-spinning.
+
+`axo_get_buffer()` is synchronous and can block while Axoverlay2 waits for a buffer.
+Frame-rate pacing reduces how often a low-frame-rate stream is queried, but it does not make buffer acquisition nonblocking.
+Because at most one acquisition is attempted per Quake frame, a blocking acquisition can delay that game frame and the next opportunity for other streams.
+
+If buffer acquisition reports `AXO_ERR_WAIT` or `AXO_ERR_NO_STREAM`, `overlay_context_begin_frame()` returns true with no active output buffer.
 Yamagi still runs the frame, but `overlay_context_end_frame()` has no overlay buffer to submit.
 
 If a buffer is returned, the matching `render_surface` is found or created.
@@ -410,20 +420,16 @@ Other submission errors stop rendering.
 
 ### Stream selection
 
-Active streams are selected in round-robin order.
+Stream selection combines frame-rate pacing with round-robin scheduling.
 
-Only one stream receives a new output buffer during each Quake frame.
-With N active streams, each stream gets about one out of every N output opportunities.
-Quake itself still renders every game frame.
+A stream is eligible when its next buffer-request deadline has arrived.
+Streams that are not yet due are skipped and do not consume round-robin slots.
+Among the streams that are due at the same time, selection proceeds in round-robin order.
+Only one due stream receives a buffer request during each Quake frame.
 
-With two streams, the selection looks like this:
-
-```text
-frame 1 -> stream A
-frame 2 -> stream B
-frame 3 -> stream A
-frame 4 -> stream B
-```
+After a buffer request, the stream's next deadline is based on the frame rate reported by VDO.
+A low-frame-rate stream is therefore queried less often than a high-frame-rate stream.
+If no stream is due, the bounded wait described above prevents an uncapped render loop while still waking promptly for VDO events or the next stream deadline.
 
 ## 8. Input architecture
 
