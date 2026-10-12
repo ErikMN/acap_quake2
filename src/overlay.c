@@ -359,11 +359,13 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
     return false;
   }
 
+  struct overlay_stream *stream = select_output_stream(overlay);
+
   /*
-   * Avoid spinning at full speed when there is no output to render.
+   * Avoid spinning at full speed when there is no active overlay to render to.
    * Waiting on the VDO event fd wakes immediately when a stream appears.
    */
-  if (!overlay->render_framebuffer) {
+  if (!stream) {
     struct pollfd event_poll = {
       .fd = overlay->event_fd,
       .events = POLLIN,
@@ -373,7 +375,6 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
     return true;
   }
 
-  struct overlay_stream *stream = select_output_stream(overlay);
   if (stream) {
     axo_err *error = NULL;
     /*
