@@ -93,6 +93,8 @@ struct overlay_stream {
   unsigned full_height;
 
   unsigned frame_count;
+  int64_t buffer_interval_us;
+  int64_t next_buffer_at_us;
   int64_t retry_at_us;
 
   struct overlay_stream *next;
@@ -102,14 +104,16 @@ static struct overlay_stream *find_overlay_stream(struct overlay_context *overla
 static bool register_overlay_stream(struct overlay_context *overlay,
                                     unsigned stream_id,
                                     unsigned stream_width,
-                                    unsigned stream_height);
+                                    unsigned stream_height,
+                                    double stream_framerate);
 static bool remove_overlay_stream(struct overlay_context *overlay, unsigned stream_id);
 static void remove_all_overlay_streams(struct overlay_context *overlay);
 
 static bool create_overlay(struct overlay_context *overlay, struct overlay_stream *stream);
 static bool destroy_stream_overlay(struct overlay_stream *stream);
 static bool retry_pending_overlays(struct overlay_context *overlay);
-static struct overlay_stream *select_output_stream(struct overlay_context *overlay);
+static struct overlay_stream *
+select_output_stream(struct overlay_context *overlay, int64_t now, int64_t *next_due_at_us);
 
 static bool create_render_target(struct overlay_context *overlay);
 static void destroy_render_target(struct overlay_context *overlay);
@@ -303,6 +307,7 @@ overlay_context_process_events(struct overlay_context *overlay)
 
       unsigned width = vdo_map_get_uint32(info, "width", 0);
       unsigned height = vdo_map_get_uint32(info, "height", 0);
+      double framerate = vdo_map_get_double(info, "framerate", 0.0);
 
       g_object_unref(info);
       g_object_unref(stream);
@@ -313,7 +318,7 @@ overlay_context_process_events(struct overlay_context *overlay)
         continue;
       }
 
-      if (!register_overlay_stream(overlay, stream_id, width, height)) {
+      if (!register_overlay_stream(overlay, stream_id, width, height, framerate)) {
         return false;
       }
 
@@ -359,19 +364,32 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
     return false;
   }
 
-  struct overlay_stream *stream = select_output_stream(overlay);
+  int64_t now = g_get_monotonic_time();
+  int64_t next_due_at_us = 0;
+  struct overlay_stream *stream = select_output_stream(overlay, now, &next_due_at_us);
 
   /*
-   * Avoid spinning at full speed when there is no active overlay to render to.
-   * Waiting on the VDO event fd wakes immediately when a stream appears.
+   * Avoid spinning at full speed when no stream is ready for another buffer request.
+   * Waiting on the VDO event fd wakes immediately when streams change.
    */
   if (!stream) {
+    int timeout_ms = NO_OUTPUT_WAIT_MS;
+
+    if (next_due_at_us > now) {
+      int64_t wait_us = next_due_at_us - now;
+      int deadline_ms = (int)((wait_us + 999) / 1000);
+
+      if (deadline_ms < timeout_ms) {
+        timeout_ms = deadline_ms;
+      }
+    }
+
     struct pollfd event_poll = {
       .fd = overlay->event_fd,
       .events = POLLIN,
     };
 
-    (void)poll(&event_poll, 1, NO_OUTPUT_WAIT_MS);
+    (void)poll(&event_poll, 1, timeout_ms);
     return true;
   }
 
@@ -383,6 +401,10 @@ overlay_context_begin_frame(struct overlay_context *overlay, const struct gpu_co
      * Axoverlay2 call per Quake frame.
      */
     axo_buffer *buffer = axo_get_buffer(stream->overlay_id, NULL, &error);
+
+    if (stream->buffer_interval_us > 0) {
+      stream->next_buffer_at_us = g_get_monotonic_time() + stream->buffer_interval_us;
+    }
     if (!buffer) {
       if (error && axo_err_get_code(error) == AXO_ERR_WAIT) {
         /*
@@ -756,6 +778,7 @@ create_overlay(struct overlay_context *overlay, struct overlay_stream *stream)
   stream->full_width = full_width;
   stream->full_height = full_height;
   stream->frame_count = 0;
+  stream->next_buffer_at_us = 0;
   stream->retry_at_us = 0;
 
   /*
@@ -796,7 +819,8 @@ static bool
 register_overlay_stream(struct overlay_context *overlay,
                         unsigned stream_id,
                         unsigned stream_width,
-                        unsigned stream_height)
+                        unsigned stream_height,
+                        double stream_framerate)
 {
   struct overlay_stream *stream = find_overlay_stream(overlay, stream_id);
 
@@ -817,6 +841,8 @@ register_overlay_stream(struct overlay_context *overlay,
 
   stream->stream_width = stream_width;
   stream->stream_height = stream_height;
+  stream->buffer_interval_us = stream_framerate > 0.0 ? (int64_t)(1000000.0 / stream_framerate) : 0;
+  stream->next_buffer_at_us = 0;
 
   if (dimensions_changed && stream->overlay_id >= 0) {
     syslog(LOG_INFO,
@@ -856,32 +882,42 @@ retry_pending_overlays(struct overlay_context *overlay)
 }
 
 /*
- * Select the next stream in round-robin order.
+ * Select the next due stream in round-robin order.
  *
- * Only one stream is selected per Quake frame.
+ * Streams whose frame-rate deadline has not arrived are skipped.
+ * If no stream is due, next_due_at_us reports the earliest upcoming deadline.
  */
 static struct overlay_stream *
-select_output_stream(struct overlay_context *overlay)
+select_output_stream(struct overlay_context *overlay, int64_t now, int64_t *next_due_at_us)
 {
-  unsigned active_count = 0;
+  unsigned due_count = 0;
+  int64_t earliest_due_at_us = 0;
 
   for (struct overlay_stream *stream = overlay->streams; stream; stream = stream->next) {
-    if (stream->overlay_id >= 0) {
-      active_count++;
+    if (stream->overlay_id < 0) {
+      continue;
+    }
+
+    if (stream->next_buffer_at_us <= now) {
+      due_count++;
+    } else if (!earliest_due_at_us || stream->next_buffer_at_us < earliest_due_at_us) {
+      earliest_due_at_us = stream->next_buffer_at_us;
     }
   }
 
-  if (!active_count) {
+  *next_due_at_us = earliest_due_at_us;
+
+  if (!due_count) {
     return NULL;
   }
 
-  unsigned target = overlay->next_stream_index % active_count;
-  overlay->next_stream_index = (target + 1) % active_count;
+  unsigned target = overlay->next_stream_index % due_count;
+  overlay->next_stream_index = (target + 1) % due_count;
 
   unsigned current = 0;
 
   for (struct overlay_stream *stream = overlay->streams; stream; stream = stream->next) {
-    if (stream->overlay_id < 0) {
+    if (stream->overlay_id < 0 || stream->next_buffer_at_us > now) {
       continue;
     }
 
@@ -939,6 +975,7 @@ destroy_stream_overlay(struct overlay_stream *stream)
   stream->full_width = 0;
   stream->full_height = 0;
   stream->frame_count = 0;
+  stream->next_buffer_at_us = 0;
 
   return true;
 }
