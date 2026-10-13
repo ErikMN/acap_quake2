@@ -607,13 +607,14 @@ It also sets:
 
 - `SDL_VIDEODRIVER=dummy`
 - `SDL_AUDIODRIVER=pipewire`
-- `PIPEWIRE_NODE=AudioDevice0Output0` if `PIPEWIRE_NODE` is not already set
 
 The process then changes its working directory to the package binary directory.
 
 SDL remains part of Yamagi.
 For the ACAP build, EGL replaces SDL as the source of the OpenGL context.
-SDL audio uses PipeWire to send game sound to an output on the device.
+Yamagi opens SDL's default playback device.
+SDL's PipeWire backend creates an autoconnecting playback stream.
+PipeWire routes that stream to the device's default audio output.
 See [Audio playback](BUILD.md#audio-playback) for output selection and permissions.
 
 ## 10. Resource and thread ownership
