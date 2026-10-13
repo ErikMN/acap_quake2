@@ -130,8 +130,10 @@ SDL2 is built with its PipeWire audio backend and dynamically loads the device's
 
 ### Audio playback
 
-Quake II selects SDL's `pipewire` audio driver at startup. Playback defaults to `AudioDevice0Output0`.
-Set `PIPEWIRE_NODE` before launching the executable to select another PipeWire output node.
+Quake II selects SDL's `pipewire` audio driver at startup.
+Yamagi opens SDL's default playback device.
+SDL's PipeWire backend creates an autoconnecting playback stream.
+PipeWire routes that stream to the device's default audio output.
 
 The manifest requests the `pipewire` group conditionally.
 Devices without that group can still install the application, but audio needs access to PipeWire and a usable output.
