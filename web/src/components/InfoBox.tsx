@@ -8,6 +8,7 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import Typography from '@mui/material/Typography';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useTheme } from '@mui/material/styles';
 
 /** Props for MyListItem */
@@ -135,6 +136,11 @@ const InfoBox: React.FC = () => {
         <MyListItem
           primaryText="Plug speaker or headphones to the audio output on your device."
           icon={<InfoOutlinedIcon />}
+          fontSize={12}
+        />
+        <MyListItem
+          primaryText="Check the audio gain before connecting headphones or speakers."
+          icon={<WarningAmberIcon />}
           fontSize={12}
         />
       </List>
