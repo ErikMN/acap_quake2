@@ -613,8 +613,12 @@ The process then changes its working directory to the package binary directory.
 SDL remains part of Yamagi.
 For the ACAP build, EGL replaces SDL as the source of the OpenGL context.
 Yamagi opens SDL's default playback device.
-SDL's PipeWire backend creates an autoconnecting playback stream.
-PipeWire routes that stream to the device's default audio output.
+The ACAP SDL patch checks the output nodes already present in SDL's PipeWire device list.
+It selects the lowest `AudioDeviceNOutputM` node and lets SDL's existing PipeWire backend target that output.
+If there is no matching Axis output, SDL returns an audio-open error immediately.
+Yamagi treats that failure as non-fatal and continues with sound disabled.
+An existing `PIPEWIRE_NODE` value skips the automatic selection.
+PipeWire is still loaded dynamically by SDL.
 See [Audio playback](BUILD.md#audio-playback) for output selection and permissions.
 
 ## 10. Resource and thread ownership

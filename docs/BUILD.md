@@ -127,13 +127,18 @@ build/sdl2-install
 ```
 
 SDL2 is built with its PipeWire audio backend and dynamically loads the device's `libpipewire-0.3.so.0`.
+The build applies the ACAP-specific audio selection changes from `patches/sdl2-acap.patch`.
 
 ### Audio playback
 
 Quake II selects SDL's `pipewire` audio driver at startup.
-Yamagi opens SDL's default playback device.
-SDL's PipeWire backend creates an autoconnecting playback stream.
-PipeWire routes that stream to the device's default audio output.
+When Yamagi opens SDL's default playback device, the ACAP SDL patch checks the PipeWire output nodes already discovered by SDL.
+It considers node paths named `AudioDeviceNOutputM` and selects the lowest device ID and then the lowest output ID.
+SDL then targets that node through its existing PipeWire stream setup.
+If no matching Axis output exists, SDL fails the audio open immediately and Yamagi continues with sound disabled.
+This avoids entering PipeWire's default playback path on devices without an audio output.
+An existing `PIPEWIRE_NODE` environment value skips the automatic Axis output selection.
+PipeWire remains dynamically loaded by SDL, so audio discovery does not add a process-start dependency on PipeWire.
 
 The manifest requests the `pipewire` group conditionally.
 Devices without that group can still install the application, but audio needs access to PipeWire and a usable output.

@@ -1,0 +1,99 @@
+diff --git a/src/audio/pipewire/SDL_pipewire.c b/src/audio/pipewire/SDL_pipewire.c
+--- a/src/audio/pipewire/SDL_pipewire.c
++++ b/src/audio/pipewire/SDL_pipewire.c
+@@ -386,16 +386,44 @@
+     return NULL;
+ }
+ 
+-static struct io_node *io_list_get_by_path(char *path)
+-{
+-    struct io_node *n, *temp;
+-    spa_list_for_each_safe (n, temp, &hotplug_io_list, link) {
+-        if (SDL_strcmp(n->path, path) == 0) {
+-            return n;
+-        }
+-    }
+-    return NULL;
+-}
++static struct io_node *io_list_get_by_path(char *path)
++{
++    struct io_node *n, *temp;
++    spa_list_for_each_safe (n, temp, &hotplug_io_list, link) {
++        if (SDL_strcmp(n->path, path) == 0) {
++            return n;
++        }
++    }
++    return NULL;
++}
++
++static struct io_node *io_list_get_axis_output(void)
++{
++    struct io_node *n;
++    struct io_node *selected = NULL;
++    unsigned int selected_device = 0;
++    unsigned int selected_output = 0;
++
++    spa_list_for_each (n, &hotplug_io_list, link) {
++        unsigned int device;
++        unsigned int output;
++        char trailing;
++
++        if (n->is_capture ||
++            SDL_sscanf(n->path, "AudioDevice%uOutput%u%c", &device, &output, &trailing) != 2) {
++            continue;
++        }
++
++        if (!selected || device < selected_device ||
++            (device == selected_device && output < selected_output)) {
++            selected = n;
++            selected_device = device;
++            selected_output = output;
++        }
++    }
++
++    return selected;
++}
+ 
+ static void node_object_destroy(struct node_object *node)
+ {
+@@ -1164,14 +1192,32 @@
+     struct spa_pod_builder b = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
+     struct spa_audio_info_raw spa_info = { 0 };
+     const struct spa_pod *params = NULL;
+-    struct SDL_PrivateAudioData *priv;
+-    struct pw_properties *props;
+-    const char *app_name, *stream_name, *stream_role, *error;
+-    Uint32 node_id = !this->handle ? PW_ID_ANY : PW_HANDLE_TO_ID(this->handle);
+-    SDL_bool iscapture = this->iscapture;
+-    int res;
+-
+-    /* Clamp the period size to sane values */
++    struct SDL_PrivateAudioData *priv;
++    struct pw_properties *props;
++    const char *app_name, *stream_name, *stream_role, *error;
++    const char *configured_node = SDL_getenv("PIPEWIRE_NODE");
++    struct io_node *axis_output = NULL;
++    Uint32 node_id = !this->handle ? PW_ID_ANY : PW_HANDLE_TO_ID(this->handle);
++    SDL_bool iscapture = this->iscapture;
++    int res;
++
++    /* Clamp the period size to sane values */
+     const int min_period = PW_MIN_SAMPLES * SPA_MAX(this->spec.freq / PW_BASE_CLOCK_RATE, 1);
+ 
++    if (node_id == PW_ID_ANY && !iscapture && (!configured_node || *configured_node == '\0')) {
++        PIPEWIRE_pw_thread_loop_lock(hotplug_loop);
++        axis_output = io_list_get_axis_output();
++
++        if (axis_output) {
++            node_id = axis_output->id;
++            SDL_Log("Using Axis PipeWire audio output: %s", axis_output->path);
++        }
++
++        PIPEWIRE_pw_thread_loop_unlock(hotplug_loop);
++
++        if (!axis_output) {
++            return SDL_SetError("PipeWire: no Axis audio output is available");
++        }
++    }
++
+     /* Get the hints for the application name, stream name and role */
