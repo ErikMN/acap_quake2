@@ -33,6 +33,11 @@ translate_key(enum acap_key_code code, int *key, bool *special)
 
   *special = true;
 
+  if (code >= ACAP_KEY_F1 && code <= ACAP_KEY_F15) {
+    *key = K_F1 + (code - ACAP_KEY_F1);
+    return true;
+  }
+
   switch (code) {
   case ACAP_KEY_ESCAPE:
     *key = K_ESCAPE;
@@ -73,6 +78,151 @@ translate_key(enum acap_key_code code, int *key, bool *special)
     return true;
   case ACAP_KEY_ARROW_RIGHT:
     *key = K_RIGHTARROW;
+    return true;
+  case ACAP_KEY_BACKQUOTE:
+    *key = K_CONSOLE;
+    return true;
+  case ACAP_KEY_INSERT:
+    *key = K_INS;
+    return true;
+  case ACAP_KEY_DELETE:
+    *key = K_DEL;
+    return true;
+  case ACAP_KEY_HOME:
+    *key = K_HOME;
+    return true;
+  case ACAP_KEY_END:
+    *key = K_END;
+    return true;
+  case ACAP_KEY_PAGE_UP:
+    *key = K_PGUP;
+    return true;
+  case ACAP_KEY_PAGE_DOWN:
+    *key = K_PGDN;
+    return true;
+  case ACAP_KEY_CAPS_LOCK:
+    *key = K_CAPSLOCK;
+    return true;
+  case ACAP_KEY_NUM_LOCK:
+    *key = K_KP_NUMLOCK;
+    return true;
+  case ACAP_KEY_SCROLL_LOCK:
+    *key = K_SCROLLOCK;
+    return true;
+  case ACAP_KEY_PAUSE:
+    *key = K_PAUSE;
+    return true;
+  case ACAP_KEY_PRINT_SCREEN:
+    *key = K_PRINT;
+    return true;
+  case ACAP_KEY_META_LEFT:
+    *key = K_COMMAND;
+    return true;
+  case ACAP_KEY_META_RIGHT:
+    *key = K_COMMAND;
+    return true;
+  case ACAP_KEY_CONTEXT_MENU:
+    *key = K_MENU;
+    return true;
+  case ACAP_KEY_NUMPAD_0:
+    *key = K_KP_INS;
+    return true;
+  case ACAP_KEY_NUMPAD_1:
+    *key = K_KP_END;
+    return true;
+  case ACAP_KEY_NUMPAD_2:
+    *key = K_KP_DOWNARROW;
+    return true;
+  case ACAP_KEY_NUMPAD_3:
+    *key = K_KP_PGDN;
+    return true;
+  case ACAP_KEY_NUMPAD_4:
+    *key = K_KP_LEFTARROW;
+    return true;
+  case ACAP_KEY_NUMPAD_5:
+    *key = K_KP_5;
+    return true;
+  case ACAP_KEY_NUMPAD_6:
+    *key = K_KP_RIGHTARROW;
+    return true;
+  case ACAP_KEY_NUMPAD_7:
+    *key = K_KP_HOME;
+    return true;
+  case ACAP_KEY_NUMPAD_8:
+    *key = K_KP_UPARROW;
+    return true;
+  case ACAP_KEY_NUMPAD_9:
+    *key = K_KP_PGUP;
+    return true;
+  case ACAP_KEY_NUMPAD_ENTER:
+    *key = K_KP_ENTER;
+    return true;
+  case ACAP_KEY_NUMPAD_ADD:
+    *key = K_KP_PLUS;
+    return true;
+  case ACAP_KEY_NUMPAD_SUBTRACT:
+    *key = K_KP_MINUS;
+    return true;
+  case ACAP_KEY_NUMPAD_MULTIPLY:
+    *key = K_KP_STAR;
+    return true;
+  case ACAP_KEY_NUMPAD_DIVIDE:
+    *key = K_KP_SLASH;
+    return true;
+  case ACAP_KEY_NUMPAD_DECIMAL:
+    *key = K_KP_DEL;
+    return true;
+  case ACAP_KEY_NUMPAD_EQUAL:
+    *key = K_KP_EQUALS;
+    return true;
+  case ACAP_KEY_INTL_BACKSLASH:
+    *key = K_SC_NONUSBACKSLASH;
+    return true;
+  case ACAP_KEY_INTL_RO:
+    *key = K_SC_INTERNATIONAL1;
+    return true;
+  case ACAP_KEY_INTL_YEN:
+    *key = K_SC_INTERNATIONAL3;
+    return true;
+  case ACAP_KEY_MINUS:
+    *key = '-';
+    *special = false;
+    return true;
+  case ACAP_KEY_EQUAL:
+    *key = '=';
+    *special = false;
+    return true;
+  case ACAP_KEY_BRACKET_LEFT:
+    *key = '[';
+    *special = false;
+    return true;
+  case ACAP_KEY_BRACKET_RIGHT:
+    *key = ']';
+    *special = false;
+    return true;
+  case ACAP_KEY_BACKSLASH:
+    *key = '\\';
+    *special = false;
+    return true;
+  case ACAP_KEY_SEMICOLON:
+    *key = ';';
+    *special = false;
+    return true;
+  case ACAP_KEY_QUOTE:
+    *key = '\'';
+    *special = false;
+    return true;
+  case ACAP_KEY_COMMA:
+    *key = ',';
+    *special = false;
+    return true;
+  case ACAP_KEY_PERIOD:
+    *key = '.';
+    *special = false;
+    return true;
+  case ACAP_KEY_SLASH:
+    *key = '/';
+    *special = false;
     return true;
   default:
     return false;
@@ -199,6 +349,7 @@ acap_yamagi_input_update(float *mouse_x, float *mouse_y, bool mouse_active)
       break;
 
     case ACAP_INPUT_EVENT_TEXT:
+      Char_Event(event.data.text);
       break;
     }
   }

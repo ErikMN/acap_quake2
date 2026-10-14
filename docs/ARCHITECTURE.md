@@ -461,7 +461,7 @@ flowchart TD
     Socket --> Decode
     Decode --> Queue
     Queue -->|acap_input_next_event| Adapter
-    Adapter -->|Key_Event and mouse deltas| Yamagi
+    Adapter -->|Key_Event, Char_Event and mouse deltas| Yamagi
 ```
 
 The input queue is the handoff between the two threads.
@@ -480,7 +480,9 @@ Clicking the game area focuses it and requests pointer lock, which captures the 
 This lets the player keep turning without the cursor reaching the edge of the screen.
 Mouse movement, buttons, and wheel input are sent while pointer lock is active.
 Keyboard input is accepted while the game area has pointer lock or keyboard focus.
-The handler uses `KeyboardEvent.code`, so keys represent physical positions rather than typed characters.
+The handler uses `KeyboardEvent.code` for physical key events and `KeyboardEvent.key` for printable text.
+The backquote key toggles the game console without using Escape.
+Text messages contain printable ASCII characters. Other characters are not forwarded because the Yamagi console accepts ASCII input.
 It sends messages only while the WebSocket is open.
 Controls used while disconnected are not saved for later.
 
@@ -526,11 +528,13 @@ Multi-byte integers use little-endian byte order: the low byte comes before the 
 | Mouse button | 3 | `version, type, button, down` |
 | Wheel | 4 | `version, type, x, y` |
 | Reset | 5 | `version, type` |
+| Text | 6 | `version, type, ascii` |
 
 `down` must be 0 or 1. Mouse deltas are signed 16-bit integers. Wheel values are signed 8-bit integers.
 The browser normalizes each wheel axis to -1, 0, or 1 before sending it.
 The Yamagi adapter currently uses only vertical wheel value `y`.
 Horizontal `x` is decoded but ignored.
+Text messages contain one printable ASCII byte in the range 32 through 126.
 
 For example, pressing physical key `KeyW` sends the decimal bytes `1, 1, 23, 0, 1`.
 These mean protocol version 1, key message, key ID 23, and pressed. Releasing it changes the last byte to 0.
@@ -565,6 +569,7 @@ It maps:
 
 - letters and digits to their character values
 - special keys to Yamagi key constants
+- printable ASCII text to `Char_Event()`
 - mouse buttons to `K_MOUSE1` through `K_MOUSE5`
 - vertical wheel movement to `K_MWHEELUP` or `K_MWHEELDOWN`
 

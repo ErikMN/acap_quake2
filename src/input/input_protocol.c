@@ -63,6 +63,15 @@ acap_input_protocol_decode(const uint8_t *data, size_t len, struct acap_input_ev
     event->type = ACAP_INPUT_EVENT_RESET;
     return true;
 
+  case ACAP_INPUT_MESSAGE_TEXT:
+    if (len != 3 || data[2] < 32 || data[2] > 126) {
+      return false;
+    }
+
+    event->type = ACAP_INPUT_EVENT_TEXT;
+    event->data.text = data[2];
+    return true;
+
   default:
     return false;
   }

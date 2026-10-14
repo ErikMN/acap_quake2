@@ -18,7 +18,8 @@ enum MessageType {
   Mouse = 2,
   Button = 3,
   Wheel = 4,
-  Reset = 5
+  Reset = 5,
+  Text = 6
 }
 
 enum AcapKey {
@@ -72,7 +73,67 @@ enum AcapKey {
   ArrowUp = 48,
   ArrowDown = 49,
   ArrowLeft = 50,
-  ArrowRight = 51
+  ArrowRight = 51,
+  F1 = 52,
+  F2 = 53,
+  F3 = 54,
+  F4 = 55,
+  F5 = 56,
+  F6 = 57,
+  F7 = 58,
+  F8 = 59,
+  F9 = 60,
+  F10 = 61,
+  F11 = 62,
+  F12 = 63,
+  F13 = 64,
+  F14 = 65,
+  F15 = 66,
+  Backquote = 67,
+  Minus = 68,
+  Equal = 69,
+  BracketLeft = 70,
+  BracketRight = 71,
+  Backslash = 72,
+  Semicolon = 73,
+  Quote = 74,
+  Comma = 75,
+  Period = 76,
+  Slash = 77,
+  Insert = 78,
+  Delete = 79,
+  Home = 80,
+  End = 81,
+  PageUp = 82,
+  PageDown = 83,
+  CapsLock = 84,
+  NumLock = 85,
+  ScrollLock = 86,
+  Pause = 87,
+  PrintScreen = 88,
+  MetaLeft = 89,
+  MetaRight = 90,
+  ContextMenu = 91,
+  Numpad0 = 92,
+  Numpad1 = 93,
+  Numpad2 = 94,
+  Numpad3 = 95,
+  Numpad4 = 96,
+  Numpad5 = 97,
+  Numpad6 = 98,
+  Numpad7 = 99,
+  Numpad8 = 100,
+  Numpad9 = 101,
+  NumpadEnter = 102,
+  NumpadAdd = 103,
+  NumpadSubtract = 104,
+  NumpadMultiply = 105,
+  NumpadDivide = 106,
+  NumpadDecimal = 107,
+  NumpadEqual = 108,
+  IntlBackslash = 109,
+  IntlRo = 110,
+  IntlYen = 111
 }
 
 const keyCodes: Record<string, AcapKey> = {
@@ -126,8 +187,76 @@ const keyCodes: Record<string, AcapKey> = {
   ArrowUp: AcapKey.ArrowUp,
   ArrowDown: AcapKey.ArrowDown,
   ArrowLeft: AcapKey.ArrowLeft,
-  ArrowRight: AcapKey.ArrowRight
+  ArrowRight: AcapKey.ArrowRight,
+  F1: AcapKey.F1,
+  F2: AcapKey.F2,
+  F3: AcapKey.F3,
+  F4: AcapKey.F4,
+  F5: AcapKey.F5,
+  F6: AcapKey.F6,
+  F7: AcapKey.F7,
+  F8: AcapKey.F8,
+  F9: AcapKey.F9,
+  F10: AcapKey.F10,
+  F11: AcapKey.F11,
+  F12: AcapKey.F12,
+  F13: AcapKey.F13,
+  F14: AcapKey.F14,
+  F15: AcapKey.F15,
+  Backquote: AcapKey.Backquote,
+  Minus: AcapKey.Minus,
+  Equal: AcapKey.Equal,
+  BracketLeft: AcapKey.BracketLeft,
+  BracketRight: AcapKey.BracketRight,
+  Backslash: AcapKey.Backslash,
+  Semicolon: AcapKey.Semicolon,
+  Quote: AcapKey.Quote,
+  Comma: AcapKey.Comma,
+  Period: AcapKey.Period,
+  Slash: AcapKey.Slash,
+  Insert: AcapKey.Insert,
+  Delete: AcapKey.Delete,
+  Home: AcapKey.Home,
+  End: AcapKey.End,
+  PageUp: AcapKey.PageUp,
+  PageDown: AcapKey.PageDown,
+  CapsLock: AcapKey.CapsLock,
+  NumLock: AcapKey.NumLock,
+  ScrollLock: AcapKey.ScrollLock,
+  Pause: AcapKey.Pause,
+  PrintScreen: AcapKey.PrintScreen,
+  MetaLeft: AcapKey.MetaLeft,
+  MetaRight: AcapKey.MetaRight,
+  ContextMenu: AcapKey.ContextMenu,
+  Numpad0: AcapKey.Numpad0,
+  Numpad1: AcapKey.Numpad1,
+  Numpad2: AcapKey.Numpad2,
+  Numpad3: AcapKey.Numpad3,
+  Numpad4: AcapKey.Numpad4,
+  Numpad5: AcapKey.Numpad5,
+  Numpad6: AcapKey.Numpad6,
+  Numpad7: AcapKey.Numpad7,
+  Numpad8: AcapKey.Numpad8,
+  Numpad9: AcapKey.Numpad9,
+  NumpadEnter: AcapKey.NumpadEnter,
+  NumpadAdd: AcapKey.NumpadAdd,
+  NumpadSubtract: AcapKey.NumpadSubtract,
+  NumpadMultiply: AcapKey.NumpadMultiply,
+  NumpadDivide: AcapKey.NumpadDivide,
+  NumpadDecimal: AcapKey.NumpadDecimal,
+  NumpadEqual: AcapKey.NumpadEqual,
+  IntlBackslash: AcapKey.IntlBackslash,
+  IntlRo: AcapKey.IntlRo,
+  IntlYen: AcapKey.IntlYen
 };
+
+const repeatableKeys = new Set<AcapKey>([
+  AcapKey.Backspace,
+  AcapKey.PageUp,
+  AcapKey.PageDown,
+  AcapKey.Numpad3,
+  AcapKey.Numpad9
+]);
 
 const clampInt16 = (value: number): number => {
   return Math.max(-32768, Math.min(32767, Math.trunc(value)));
@@ -196,6 +325,12 @@ const QuakeInputHandler = ({
       view.setUint16(2, key, true);
       view.setUint8(4, down ? 1 : 0);
       send(packet);
+    };
+
+    const sendText = (character: number) => {
+      send(
+        new Uint8Array([PROTOCOL_VERSION, MessageType.Text, character]).buffer
+      );
     };
 
     const sendMouse = (dx: number, dy: number) => {
@@ -272,23 +407,37 @@ const QuakeInputHandler = ({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!inputActive() || event.repeat) {
+      if (!inputActive() || event.isComposing) {
         return;
       }
 
       const key = keyCodes[event.code];
-      if (key === undefined) {
+      const character = event.key.length === 1 ? event.key.charCodeAt(0) : 0;
+      const printable =
+        event.code !== 'Backquote' &&
+        character >= 32 &&
+        character <= 126 &&
+        !event.metaKey &&
+        (!event.ctrlKey || event.getModifierState('AltGraph'));
+
+      if (key === undefined && !printable) {
         return;
       }
 
       event.preventDefault();
 
-      if (pressedKeysRef.current.has(event.code)) {
-        return;
+      if (key !== undefined) {
+        if (!pressedKeysRef.current.has(event.code)) {
+          pressedKeysRef.current.add(event.code);
+          sendKey(key, true);
+        } else if (event.repeat && repeatableKeys.has(key)) {
+          sendKey(key, true);
+        }
       }
 
-      pressedKeysRef.current.add(event.code);
-      sendKey(key, true);
+      if (printable && !event.repeat) {
+        sendText(character);
+      }
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {

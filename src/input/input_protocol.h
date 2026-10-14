@@ -24,6 +24,7 @@ enum acap_input_message_type {
   ACAP_INPUT_MESSAGE_BUTTON = 3,
   ACAP_INPUT_MESSAGE_WHEEL = 4,
   ACAP_INPUT_MESSAGE_RESET = 5,
+  ACAP_INPUT_MESSAGE_TEXT = 6,
 };
 
 /*
