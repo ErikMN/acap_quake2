@@ -63,7 +63,9 @@ const AboutModal: React.FC<AboutModalProps> = ({ open, handleClose }) => {
             maxHeight: isMobile ? '100%' : '90vh',
             overflowY: 'auto',
             bgcolor:
-              theme.palette.mode === 'dark' ? 'secondary.main' : 'primary.main',
+              theme.palette.mode === 'dark'
+                ? 'secondary.main'
+                : 'background.paper',
             border: isMobile
               ? 'none'
               : theme.palette.mode === 'dark'
@@ -81,7 +83,7 @@ const AboutModal: React.FC<AboutModalProps> = ({ open, handleClose }) => {
             color="text.primary"
             sx={{ fontWeight: 700, letterSpacing: '0.08em', mb: 1 }}
           >
-            QUAKE II
+            {import.meta.env.VITE_WEBSITE_NAME.toUpperCase()}
           </Typography>
           <Typography
             color="text.primary"
@@ -140,7 +142,8 @@ const AboutModal: React.FC<AboutModalProps> = ({ open, handleClose }) => {
                 '& img': {
                   width: '50px',
                   height: '50px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  filter: theme.palette.mode === 'light' ? 'invert(1)' : 'none'
                 }
               }}
             >
