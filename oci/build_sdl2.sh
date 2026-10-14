@@ -7,6 +7,7 @@ ROOT="$PWD"
 SDL_DIR="$ROOT/third_party/SDL2"
 BUILD_DIR="$ROOT/build/sdl2-build"
 PREFIX="$ROOT/build/sdl2-install"
+PATCH_FILE="$ROOT/patches/sdl2-acap.patch"
 
 CC_BIN="${CC%% *}"
 HOST_TRIPLET="$("$CC_BIN" -dumpmachine)"
@@ -20,6 +21,16 @@ if ! pkg-config --exists 'libpipewire-0.3 >= 0.3.20'; then
   echo "SDL2 audio requires PipeWire development files in the ACAP SDK."
   exit 1
 fi
+
+# Keep the ACAP-specific SDL changes outside the pinned SDL submodule.
+git -C "$SDL_DIR" reset --hard HEAD
+
+if ! git -C "$SDL_DIR" apply --check "$PATCH_FILE"; then
+  echo "SDL2 ACAP patch does not apply cleanly."
+  exit 1
+fi
+
+git -C "$SDL_DIR" apply "$PATCH_FILE"
 
 rm -rf "$BUILD_DIR" "$PREFIX"
 mkdir -p "$BUILD_DIR" "$PREFIX"
